@@ -1,0 +1,29 @@
+# ---- local toolchains (huge, not source) ----
+jdk-17/
+NDK-CMake-GStreamer/
+openjdk17.zip
+
+# ---- build outputs ----
+build/
+.gradle/
+local.properties
+*.apk
+*.aar
+dist/
+maven-repo/
+
+# ---- native build cache ----
+.cxx/
+*.so
+*.o
+*.a
+
+# ---- IDE ----
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+
+# ---- misc ----
+*.log
+.DS_Store
