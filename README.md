@@ -1,6 +1,6 @@
 # LatencyPlayer SDK
 
-基于 **GStreamer 1.28.7**（Android 静态库）的 Android 直播播放器 SDK。
+基于 **GStreamer**（Android 静态库）的 Android 直播播放器 SDK。
 主路径：**RTMP 拉流 → 软/硬解 → appsink 直绘 `ANativeWindow`**（绕过 EGL，模拟器也稳定）。
 
 ```java
