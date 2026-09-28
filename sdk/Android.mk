@@ -11,14 +11,14 @@ GSTREAMER_ROOT := $(GSTREAMER_ROOT_ANDROID)/$(TARGET_ARCH_ABI)
 # First include GStreamer ndk-build makefile (defines gstreamer_android module)
 include $(GSTREAMER_ROOT)/../share/gst-android/ndk-build/gstreamer-1.0.mk
 
-# Then build our smartplayer module
+# Then build our latencyplayer module
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := smartplayer
+LOCAL_MODULE := latencyplayer
 
 LOCAL_SRC_FILES := \
-    src/main/cpp/smart_player_jni.c \
-    src/main/cpp/smart_player_core.c
+    src/main/cpp/latency_player_jni.c \
+    src/main/cpp/latency_player_core.c
 
 LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/src/main/cpp \
