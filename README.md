@@ -65,7 +65,22 @@ player.start();
 
 ## 延迟
 
-**当前状态：稳态延迟 ≥100ms，为已知未解决问题**（客户端侧缓冲已压到很低，根因未定位，详见 [已知问题](#已知问题)）。
+### 实测数据（小米 11 / arm64-v8a / API 34，源流 720x1280 H.264 RTMP）
+
+| 指标 | 结果 | 计时方式 |
+|------|------|---------|
+| 首帧（点击播放 → 首帧渲染） | **avg 491 ms**（3 次：457 / 491 / 528 ms） | 点击的设备时刻 → logcat `First frame post` 时间戳 |
+| 稳态画面延迟（相对 PC 低延迟参考） | **53–174 ms，中位 ~125 ms**（16 次有效采样） | 逐帧内容匹配，见下 |
+
+稳态测量方法：PC 端用 `ffmpeg -fflags +nobuffer -flags low_delay` 拉同一直播流，缓存「帧到达时刻 + 128x206 灰度帧」；手机端 `screencap`（raw 格式，设备侧 `date +%s.%3N` 时间戳，采集窗口 ~200 ms）截图裁剪播放区域，与 PC 帧做 SAD 逐帧匹配。匹配质量 `best_diff ≈ 2.7`、次优帧 ≥ 4（存在明确波谷），设备/PC 时钟用 `adb shell date` 对齐（rtt ~100 ms）。
+
+误差与边界：
+
+- 截图采集发生在时间窗**开头**（PNG 全量编码会把窗口拉到 1.8 s，取中点即虚高 ~900 ms，已改用 raw 规避），取中点仍系统性高估 ~100 ms；
+- 该值是「手机链路 − PC 参考链路」的相对量，双方网络路径与解码耗时未剥离；
+- 与配置的 `queue2 50ms + multiqueue 80ms ≈ 130 ms` 同量级，互为印证。
+
+> 早期记录的「稳态 ≥7 s」是测量假象：测量期间设备息屏（Dozing）导致截图全黑、帧匹配失效。
 
 低延迟配置（客户端能做的都已做）：
 
@@ -84,9 +99,7 @@ LatencyPlayerConfig.builder()
 | `queue` / `queue2` | `max-size-buffers=3`、`max-size-time=50ms`、`max-size-bytes=0` |
 | `multiqueue` | `max-size-buffers=8`、`max-size-time=80ms`、`interleave-max-bytes=0` |
 
-即**客户端侧缓冲合计已压到 ~130ms 量级**，理论端到端延迟应由服务端推流节奏决定；实测仍 ≥7s，怀疑点在 GStreamer `playbin`/`rtspsrc` 之外的延迟累积（如解码器输入队列、`sync` 时序），**待定位**。
-
-> 首帧耗时、端到端延迟的精确计时数据待补充（需真机在环测量）。
+即**客户端侧缓冲合计 ~130 ms**，与上表稳态实测同量级；端到端剩余部分由服务端推流节奏与网络决定。
 
 ---
 
@@ -213,11 +226,11 @@ E:\Android-SDK\
 
 ## 已知问题
 
-1. **稳态延迟** —— 根因未定位。客户端缓冲已压至 `queue2` 50ms / `multiqueue` 80ms（合计 ~130ms），延迟累积不在客户端缓冲，待排查解码/时序环节。
-2. **快速 停止→播放 切换可能崩溃** —— 流线程 caps use-after-free（teardown 与 bus 回调竞态，栈在 `gst_caps_features_set_parent_refcount` / `gst_caps_push`）。修复中；**规避：停止后等状态回到 `STOPPED` 再 `start()`**。
-3. **ABI 暂时全量 4 个** —— arm64-only 精简策略待拍板（可再省约 2/3 体积）。
+1. **快速 停止→播放 切换可能崩溃** —— 流线程 caps use-after-free（teardown 与 bus 回调竞态，栈在 `gst_caps_features_set_parent_refcount` / `gst_caps_push`）。修复中；**规避：停止后等状态回到 `STOPPED` 再 `start()`**。
+2. **ABI 暂时全量 4 个** —— arm64-only 精简策略待拍板（可再省约 2/3 体积）。
+3. **测量时设备必须常亮** —— 息屏（Dozing）会让 Surface 停止渲染，截图全黑、延迟测量失效；已知问题曾因此被误判为「稳态延迟 ≥7s」。
 
-已修复：连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
+已修复：稳态延迟误判（实测 ~125ms，见 [延迟](#延迟)）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
 
 ---
 

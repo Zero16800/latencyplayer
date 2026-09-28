@@ -327,10 +327,10 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 ## 11. 已知问题（2026-09）
 
 1. **快速 停止→播放 可能崩溃**：流线程 `multiqueue:src` caps use-after-free（teardown 与 bus 回调 `on_buffering`/`on_async_done` 竞态，栈在 `gst_caps_features_copy`）。修复中；规避：停止后等状态回 `STOPPED` 再 `start()`。
-2. **稳态延迟 ≥7s**：根因未定位（客户端缓冲已压至 queue2 50ms / multiqueue 80ms 量级）。
+2. **测量时设备必须常亮**：息屏（Dozing）会让 Surface 停止渲染、截图全黑，延迟测量失效（早期「稳态延迟 ≥7s」即由此误判；真机实测首帧 avg 491ms、稳态画面延迟中位 ~125ms，详见 [README 延迟](../README.md#延迟)）。
 3. **ABI 全量 4 个**：arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 
-已修复：连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
+已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
 
 ## 12. 许可证
 
