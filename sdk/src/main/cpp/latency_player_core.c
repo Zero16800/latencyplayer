@@ -482,6 +482,18 @@ int latency_player_init(LatencyPlayerContext *ctx, JavaVM *java_vm, jobject java
     return 0;
 }
 
+static gboolean is_live_uri(const char *uri) {
+    if (uri == NULL) return FALSE;
+    if (g_str_has_prefix(uri, "rtmp://") || g_str_has_prefix(uri, "rtmps://") ||
+        g_str_has_prefix(uri, "rtsp://") || g_str_has_prefix(uri, "rtsps://")) {
+        return TRUE;
+    }
+    const char *q = strpbrk(uri, "?#");
+    gsize len = q != NULL ? (gsize)(q - uri) : strlen(uri);
+    return (len >= 4 && g_ascii_strcasecmp(uri + len - 4, ".flv") == 0) ||
+           (len >= 5 && g_ascii_strcasecmp(uri + len - 5, ".m3u8") == 0);
+}
+
 int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx == NULL || uri == NULL) return -1;
 
@@ -507,12 +519,10 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     gchar *full_uri = build_uri_with_params(uri, ctx->rtmp_timeout, ctx->rtmp_retry_count);
     ctx->uri = g_strdup(uri);
 
-    /* RTMP/RTSP are live: mark before PLAYING so buffering path does not pause
-       and intermediate queue2 percentages are not reported as "stuck buffering". */
-    ctx->is_live_source = g_str_has_prefix(uri, "rtmp://") ||
-                          g_str_has_prefix(uri, "rtmps://") ||
-                          g_str_has_prefix(uri, "rtsp://") ||
-                          g_str_has_prefix(uri, "rtsps://");
+    /* RTMP/RTSP/HTTP-FLV/HLS are live: mark before PLAYING so buffering path
+       does not pause and intermediate queue2 percentages are not reported as
+       "stuck buffering". */
+    ctx->is_live_source = is_live_uri(uri);
 
     GError *error = NULL;
 
@@ -1465,6 +1475,19 @@ static void on_first_video_frame(GstElement *element, GstPad *pad, gpointer user
     latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
 }
 
+static guint src_probe_count = 0;
+
+static GstPadProbeReturn log_src_buffer(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
+    (void)pad;
+    (void)user_data;
+    guint n = (guint)g_atomic_int_add((volatile gint *)&src_probe_count, 1);
+    if (n <= 3 || (n % 500) == 0) {
+        LOGI("src pad buffer #%u size=%" G_GSIZE_FORMAT, n,
+             gst_buffer_get_size(GST_PAD_PROBE_INFO_BUFFER(info)));
+    }
+    return GST_PAD_PROBE_OK;
+}
+
 static void on_source_setup(GstElement *playbin, GstElement *source, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
 
@@ -1495,8 +1518,42 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
              ctx->rtmp_timeout, source_name, (int)ctx->low_latency);
     }
 
-    /* 低延迟：源上有 latency 则压到 0（jitterbuffer 等） */
-    if (ctx->low_latency &&
+    if (g_str_has_prefix(ctx->uri, "rtsp://") || g_str_has_prefix(ctx->uri, "rtsps://")) {
+        if (g_strcmp0(source_name, "rtspsrc") == 0 &&
+            g_object_class_find_property(G_OBJECT_GET_CLASS(source), "latency")) {
+            guint lat = ctx->low_latency ? 80u : 200u;
+            g_object_set(source, "latency", lat, NULL);
+            LOGI("RTSP source configured: rtspsrc latency=%ums", lat);
+        }
+    }
+
+    if (g_str_has_prefix(ctx->uri, "http://") || g_str_has_prefix(ctx->uri, "https://")) {
+        if (g_strcmp0(source_name, "souphttpsrc") == 0) {
+            GParamSpec *ps = g_object_class_find_property(
+                G_OBJECT_GET_CLASS(source), "timeout");
+            if (ps != NULL && ps->value_type == G_TYPE_UINT64) {
+                g_object_set(source, "timeout", (guint64)10, NULL);
+            } else if (ps != NULL && ps->value_type == G_TYPE_UINT) {
+                g_object_set(source, "timeout", (guint)10, NULL);
+            }
+            LOGI("HTTP source configured: souphttpsrc timeout prop type ok=%d",
+                 ps != NULL);
+        }
+    }
+
+    src_probe_count = 0;
+    {
+        GstPad *srcpad = gst_element_get_static_pad(source, "src");
+        if (srcpad != NULL) {
+            gst_pad_add_probe(srcpad, GST_PAD_PROBE_TYPE_BUFFER,
+                              log_src_buffer, NULL, NULL);
+            gst_object_unref(srcpad);
+            LOGI("src pad buffer probe attached");
+        }
+    }
+
+    /* 低延迟：源上有 latency 则压到 0（jitterbuffer 等），rtspsrc 已按 ms 单独处理 */
+    if (ctx->low_latency && g_strcmp0(source_name, "rtspsrc") != 0 &&
         g_object_class_find_property(G_OBJECT_GET_CLASS(source), "latency")) {
         g_object_set(source, "latency", (guint64)0, NULL);
         LOGI("source latency forced to 0 (low-latency)");

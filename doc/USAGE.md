@@ -17,7 +17,7 @@ App 模块 `build.gradle.kts`：
 
 ```kotlin
 dependencies {
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.0")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")
 }
 ```
 
@@ -256,14 +256,15 @@ player.setCallback(new LatencyPlayerCallback() {
 | 首屏慢 | 用 `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)` |
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start |
+| HTTP-FLV / HLS 起播后无画面 | **已知问题（1.0.1 待回归）**：souphttpsrc 首次 body 读可能挂起；RTMP 不受影响 |
 
 ---
 
 ## 产物体积（2026-09）
 
-- AAR（4 ABI）：**29.4 MB**（裁剪前 82 MB）
-- arm64 `liblatencyplayer.so`：**17.6 MB**（裁剪前 46.9 MB）
-- Demo APK：**37.1 MB**（全 ABI）
+- AAR（4 ABI）：**34.1 MB**（1.0.1；1.0.0 为 29.4 MB，裁剪前 82 MB）
+- arm64 `liblatencyplayer.so`：**20.3 MB**（1.0.1；1.0.0 为 17.6 MB，裁剪前 46.9 MB）
+- Demo APK：**44.7 MB**（全 ABI，1.0.1）
 
 ## 16 KB 页大小（Android 15+）
 

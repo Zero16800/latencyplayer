@@ -1,6 +1,6 @@
 # LatencyPlayer SDK — Maven 接入与完整使用指南
 
-> 坐标：`com.latencyplayer:latencyplayer-sdk:1.0.0`
+> 坐标：`com.latencyplayer:latencyplayer-sdk:1.0.1`
 > 支持：Maven 本地仓库 / Maven 远程仓库（私有 Nexus、GitHub Packages、阿里云效等）
 
 ---
@@ -18,10 +18,10 @@ gradlew.bat :sdk:publishReleasePublicationToProjectLocalRepository --no-daemon
 产出：
 
 ```
-E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.0\
-    latencyplayer-sdk-1.0.0.aar            (29.4 MB，含 4 ABI so)
-    latencyplayer-sdk-1.0.0-sources.jar
-    latencyplayer-sdk-1.0.0.pom            (传递依赖: androidx.annotation / appcompat)
+E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.1\
+    latencyplayer-sdk-1.0.1.aar            (34.1 MB，含 4 ABI so)
+    latencyplayer-sdk-1.0.1-sources.jar
+    latencyplayer-sdk-1.0.1.pom            (传递依赖: androidx.annotation / appcompat)
 ```
 
 ### 1.2 发布到 Nexus Repository 3
@@ -61,7 +61,7 @@ E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.0\
 latencyplayer.maven.url=http://<nexus-host>:8081/repository/latencyplayer-releases/
 latencyplayer.maven.user=latencyplayer-deploy
 latencyplayer.maven.password=******
-LATENCYPLAYER_VERSION=1.0.0
+LATENCYPLAYER_VERSION=1.0.1
 ```
 
 > 不想明文放仓库里，可改用环境变量：代码里 `findProperty` 会读 `-P` 参数，也可
@@ -85,20 +85,20 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon ^
 > **大文件直传**：Gradle 传 29MB AAR 偶发超时，可改用 curl 直传（同样 201）：
 > ```bat
 > curl -u admin:****** -X PUT --upload-file sdk-release.aar ^
->   http://192.168.3.160:8970/repository/maven-releases/com/latencyplayer/latencyplayer-sdk/1.0.0/latencyplayer-sdk-1.0.0.aar
+>   http://192.168.3.160:8970/repository/maven-releases/com/latencyplayer/latencyplayer-sdk/1.0.1/latencyplayer-sdk-1.0.1.aar
 > ```
 >
 > **版本覆盖**：`maven-releases` 是 `ALLOW_ONCE`，同版本再发返回 400
 > `Repository does not allow updating assets` —— 升 `LATENCYPLAYER_VERSION` 再发。
 
-上传内容：`latencyplayer-sdk-1.0.0.aar` / `.pom` / `.module` / `-sources.jar` + 各式校验文件。
+上传内容：`latencyplayer-sdk-1.0.1.aar` / `.pom` / `.module` / `-sources.jar` + 各式校验文件。
 
 #### 第五步：验证
 
 浏览器打开（或匿名可读时）：
 
 ```
-http://<nexus-host>:8081/repository/latencyplayer-releases/com/latencyplayer/latencyplayer-sdk/1.0.0/
+http://<nexus-host>:8081/repository/latencyplayer-releases/com/latencyplayer/latencyplayer-sdk/1.0.1/
 ```
 
 能看到 `.aar`/`.pom` 即成功。Nexus 里 **Components** 列表也能看到该组件。
@@ -198,7 +198,7 @@ android {
 
 dependencies {
     // ====== LatencyPlayer SDK（Maven 远程/本地依赖）======
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.0")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")
 
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
@@ -566,7 +566,7 @@ p.release();                                      // 释放（onDestroy 必调�
 | 截图 | ⚠️ | API 已接，文件写入未实现 |
 | 下载速度/码率回调 | ✅ | onDownloadSpeed |
 | 首帧/视频尺寸回调 | ✅ | 主线程回调 |
-| HLS / HTTP-FLV / RTSP | ❌ | 未注册对应插件 |
+| HLS / HTTP-FLV / RTSP | ⚠️ | 1.0.1 起插件已注册，回归验证中 |
 | WebRTC | ❌ | 不支持 |
 
 ---
@@ -597,9 +597,9 @@ p.release();                                      // 释放（onDestroy 必调�
 
 | 产物 | 大小 |
 |------|------|
-| AAR（4 ABI） | 29.4 MB |
-| arm64 so（strip 后） | 17.6 MB |
-| 接入方 APK 增量 | 按所选 ABI 拆分，单 arm64 约 +17.6 MB |
+| AAR（4 ABI） | 1.0.0: 29.4 MB / 1.0.1: 34.1 MB |
+| arm64 so（strip 后） | 1.0.0: 17.6 MB / 1.0.1: 20.3 MB |
+| 接入方 APK 增量 | 按所选 ABI 拆分，单 arm64 约 +20.3 MB（1.0.1） |
 
 ---
 
@@ -607,7 +607,7 @@ p.release();                                      // 释放（onDestroy 必调�
 
 | 现象 | 处理 |
 |------|------|
-| `Could not find com.latencyplayer:latencyplayer-sdk:1.0.0` | 确认消费方 `settings.gradle.kts` 加了仓库；本地仓库先执行 `:sdk:publish...ProjectLocalRepository` |
+| `Could not find com.latencyplayer:latencyplayer-sdk:1.0.1` | 确认消费方 `settings.gradle.kts` 加了仓库；本地仓库先执行 `:sdk:publish...ProjectLocalRepository` |
 | 拉 Nexus `Read timed out`（curl 却秒通） | 全局代理没绕过内网：`gradle.properties` 加 `systemProp.http.nonProxyHosts=192.168.*|10.*|localhost|127.0.0.1` |
 | 发布报 400 `does not allow updating assets` | Nexus `ALLOW_ONCE` 禁止同版本覆盖：升 `LATENCYPLAYER_VERSION` 再发 |
 | 发布 29MB AAR 超时/502 | Gradle 大文件偶发超时，可 curl 直传（见 1.2 第四步） |

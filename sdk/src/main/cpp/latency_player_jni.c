@@ -6,6 +6,7 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <sys/system_properties.h>
 #include <android/native_window_jni.h>
 #include <pthread.h>
 
@@ -128,6 +129,13 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
     gst_debug_set_threshold_for_name("basesrc", GST_LEVEL_WARNING);
     gst_debug_set_threshold_for_name("queue2", GST_LEVEL_WARNING);
     gst_debug_set_threshold_for_name("multiqueue", GST_LEVEL_WARNING);
+
+    /* adb shell setprop debug.latencyplayer.gst "3,soup*:5,flvdemux:5" */
+    char gst_dbg[PROP_VALUE_MAX];
+    if (__system_property_get("debug.latencyplayer.gst", gst_dbg) > 0 && gst_dbg[0] != '\0') {
+        gst_debug_set_threshold_from_string(gst_dbg, TRUE);
+        LOGI("GST debug overridden from property: %s", gst_dbg);
+    }
 
     gst_initialized = TRUE;
     LOGI("GStreamer engine initialized successfully, version: %s", gst_version_string());

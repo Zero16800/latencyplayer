@@ -71,6 +71,23 @@ set(CORE_ALLOW
     libssl
     libopenh264
     libz
+    # RTSP client stack (rtspsrc -> libgstrtsp/sdp)
+    libgstrtsp-1.0
+    libgstsdp-1.0
+    # HTTP source (souphttpsrc)
+    libsoup-3.0
+    libpsl
+    libnghttp2
+    # HLS/TS demux
+    libgstrtp-1.0
+    libgstriff-1.0
+    libgsturidownloader-1.0
+    libgstadaptivedemux-1.0
+    libgsttag-1.0
+    libgstmpegts-1.0
+    libxml2
+    # audio decode paths (FLV/TS/RTP)
+    libmpg123
 )
 
 set(CORE_LIST "")
@@ -81,7 +98,8 @@ foreach(lib ${GST_LIBS})
     endif()
 endforeach()
 
-# RTMP-only playback plugins (whole-archive for static registration)
+# Playback plugins (whole-archive for static registration).
+# RTMP + RTSP + HTTP-FLV + HLS.
 set(PLUGIN_ALLOW
     libgstcoreelements
     libgstplayback
@@ -101,6 +119,21 @@ set(PLUGIN_ALLOW
     libgstpbtypes
     libgstvideoparsersbad
     libgstaudioparsers
+    # RTSP: rtspsrc + RTP depayload/jitterbuffer
+    libgstrtsp
+    libgstrtp
+    libgstrtpmanager
+    # HTTP(S) source
+    libgstsoup
+    # HLS
+    libgsthls
+    libgstmpegtsdemux
+    libgstisomp4
+    libgstaes
+    # audio: G.711 (RTSP), MP3 (FLV/TS)
+    libgstmulaw
+    libgstalaw
+    libgstmpg123
 )
 
 set(PLUGIN_LIST "")

@@ -48,7 +48,7 @@ GSTREAMER_ROOT_ANDROID=E\:\\Android-SDK\\NDK-CMake-GStreamer
 **方式 A：Maven（推荐，见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)）**
 
 ```kotlin
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.0")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")
 ```
 
 **方式 B：本地 AAR**
@@ -224,19 +224,19 @@ gradlew.bat :app:assembleDebug --no-daemon
 
 Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 
-- 核心库与插件走**白名单**（`CORE_ALLOW` / `PLUGIN_ALLOW` 18 项），未列入的一律不链
+- 核心库与插件走**白名单**（`CORE_ALLOW` / `PLUGIN_ALLOW` 29 项），未列入的一律不链
 - 库必须经 `target_link_libraries`（放在 `.o` 之后）；`link_options`/`@rsp` 会排在 `.o` 前面导致 archive 拉不进符号
 - 库名匹配用 `NAME` + 去 `.a` 后缀（勿用 `NAME_WE`，会把 `libgstreamer-1.0.a` 截成 `libgstreamer-1`）
 - `LINKER:--no-undefined` 强制链接完整，未解析符号会在构建期报出
 - Bionic 缺失符号补桩（`gstreamer_stubs.c`）：`in6addr_any/loopback`、`getgrgid_r`、`fseeko64/ftello64`(32 位)、`__gnu_strerror_r`、84 个 `vk*`
 
-结果：AAR 82→29.4 MB，arm64 so 46.9→17.6 MB（strip 后）。
+结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1），arm64 so 46.9→17.6→20.3 MB（strip 后）。
 
 > `in6addr_*` 桩不能 include `<netinet/in.h>`（头文件里声明为 static），需自定义结构体。
 
 ### 7.4 发布链路（Maven，当前主链路）
 
-SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `implementation("com.latencyplayer:latencyplayer-sdk:1.0.0")`）。
+SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")`）。
 
 ```bat
 set JAVA_HOME=E:\Android-SDK\jdk-17
@@ -252,7 +252,7 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon
 gradlew.bat :app:clean :app:assembleDebug --no-daemon
 ```
 
-版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（默认 1.0.0）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
+版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.1）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
 
 > 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `sdk\build\outputs\aar\sdk-release.aar` 到 `app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
 
@@ -287,7 +287,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 **播放无声音 / 缺编解码**
 
-见下文能力表；当前未注册全部 GStreamer 插件。
+见下文能力表；插件走白名单（`PLUGIN_ALLOW` 29 项），未列入者不链。
 
 ## 8. 协议支持（当前实际）
 
@@ -296,9 +296,9 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 | 协议 | 支持 | 说明 |
 |------|------|------|
 | RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src` |
-| RTSP / RTSPS | ❌ | 当前未注册 `rtspsrc` 等插件 |
-| HTTP-FLV | ❌ | 未注册 soup/http 源插件 |
-| HLS | ❌ | 未注册 HLS / soup 插件 |
+| RTSP / RTSPS | ⚠️ | 1.0.1 注册 `rtspsrc` + `rtp`/`rtpmanager` + `gstrtsp`/`gstsdp`；`latency=80ms`（lowLatency）/ `200ms`。**回归验证中** |
+| HTTP-FLV | ⚠️ | 1.0.1 注册 `libsoup-3.0`（`souphttpsrc`，`timeout=10s`）。**回归验证中**，见下方已知问题 4 |
+| HLS | ⚠️ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。**回归验证中** |
 | WebRTC | ❌ | 非本 SDK 能力；纯客户端 RTMP→WebRTC 不可行 |
 
 `tcp` 插件已注册，但**不等于** 已支持完整 HTTP 播放栈。
@@ -329,6 +329,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 1. **快速 停止→播放 可能崩溃**：流线程 `multiqueue:src` caps use-after-free（teardown 与 bus 回调 `on_buffering`/`on_async_done` 竞态，栈在 `gst_caps_features_copy`）。修复中；规避：停止后等状态回 `STOPPED` 再 `start()`。
 2. **测量时设备必须常亮**：息屏（Dozing）会让 Surface 停止渲染、截图全黑，延迟测量失效（早期「稳态延迟 ≥7s」即由此误判；真机实测首帧 avg 491ms、稳态画面延迟中位 ~125ms，详见 [README 延迟](../README.md#延迟)）。
 3. **ABI 全量 4 个**：arm64-only 精简策略待拍板（可再省约 2/3 体积）。
+4. **HTTP-FLV 首次 body 读可能挂起（1.0.1 待验证）**：曾定位到 `souphttpsrc` 拿到 `HTTP 200` + 响应头后卡在 `gst_soup_http_src_read_buffer()` 的 `g_cond_wait(&session_cond)`——小响应（285B m3u8）能读，首个需要 socket 读的 body 挂住，日志里不出现 `Read N bytes from http input` / `Returning`。1.0.1 加了 `souphttpsrc timeout=10` 和 src pad buffer 探针（`debug.latencyplayer.gst` 属性可开 GStreamer 调试），**修复未回归验证**；RTSP / HLS 同样未回归。
 
 已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
 

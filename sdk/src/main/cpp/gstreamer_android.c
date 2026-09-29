@@ -4,7 +4,7 @@
  * For static builds, each plugin must be declared and registered
  * before calling gst_init().
  *
- * RTMP-minimal set only (kept in sync with CMakeLists.txt PLUGIN_ALLOW).
+ * RTMP + RTSP + HTTP-FLV + HLS (kept in sync with CMakeLists.txt PLUGIN_ALLOW).
  */
 #include <gst/gst.h>
 #include <android/log.h>
@@ -31,6 +31,17 @@ GST_PLUGIN_STATIC_DECLARE(app);
 GST_PLUGIN_STATIC_DECLARE(pbtypes);
 GST_PLUGIN_STATIC_DECLARE(videoparsersbad);
 GST_PLUGIN_STATIC_DECLARE(audioparsers);
+GST_PLUGIN_STATIC_DECLARE(rtsp);
+GST_PLUGIN_STATIC_DECLARE(rtp);
+GST_PLUGIN_STATIC_DECLARE(rtpmanager);
+GST_PLUGIN_STATIC_DECLARE(soup);
+GST_PLUGIN_STATIC_DECLARE(hls);
+GST_PLUGIN_STATIC_DECLARE(mpegtsdemux);
+GST_PLUGIN_STATIC_DECLARE(isomp4);
+GST_PLUGIN_STATIC_DECLARE(aes);
+GST_PLUGIN_STATIC_DECLARE(mulaw);
+GST_PLUGIN_STATIC_DECLARE(alaw);
+GST_PLUGIN_STATIC_DECLARE(mpg123);
 
 /* Provide stderr/stdout/stdin symbols for GStreamer static libs */
 #include <stdio.h>
@@ -71,6 +82,17 @@ void gst_init_static_plugins(void)
     GST_PLUGIN_STATIC_REGISTER(pbtypes);
     GST_PLUGIN_STATIC_REGISTER(videoparsersbad);
     GST_PLUGIN_STATIC_REGISTER(audioparsers);
+    GST_PLUGIN_STATIC_REGISTER(rtsp);
+    GST_PLUGIN_STATIC_REGISTER(rtp);
+    GST_PLUGIN_STATIC_REGISTER(rtpmanager);
+    GST_PLUGIN_STATIC_REGISTER(soup);
+    GST_PLUGIN_STATIC_REGISTER(hls);
+    GST_PLUGIN_STATIC_REGISTER(mpegtsdemux);
+    GST_PLUGIN_STATIC_REGISTER(isomp4);
+    GST_PLUGIN_STATIC_REGISTER(aes);
+    GST_PLUGIN_STATIC_REGISTER(mulaw);
+    GST_PLUGIN_STATIC_REGISTER(alaw);
+    GST_PLUGIN_STATIC_REGISTER(mpg123);
 
     /* Prefer librtmp-based rtmpsrc over rtmp2src (better server compatibility;
        rtmp2src hangs on some servers waiting for S0+S1+S2). */

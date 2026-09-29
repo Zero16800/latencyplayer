@@ -35,7 +35,7 @@ player.start();
 | 下载速度 / 码率回调 | ✅ | `onDownloadSpeed` |
 | 首帧 / 视频尺寸回调 | ✅ | 主线程回调 |
 | 截图 | ⚠️ | API 已接，文件写入未实现 |
-| HLS / HTTP-FLV / RTSP | ❌ | 未注册对应插件 |
+| HLS / HTTP-FLV / RTSP | ⚠️ | 1.0.1 起插件已注册，回归验证中 |
 | WebRTC | ❌ | 不支持 |
 
 ### 协议
@@ -43,9 +43,9 @@ player.start();
 | 协议 | 支持 | 说明 |
 |------|------|------|
 | RTMP / RTMPS | ✅ | 主路径 |
-| RTSP / RTSPS | ❌ | 未注册 `rtspsrc` 等插件 |
-| HTTP-FLV | ❌ | 未注册 soup/http 源插件 |
-| HLS | ❌ | 未注册 HLS / soup 插件 |
+| RTSP / RTSPS | ⚠️ | 1.0.1 注册 `rtspsrc` + RTP/SDP 栈，`latency=80/200ms`；回归验证中 |
+| HTTP-FLV | ⚠️ | 1.0.1 注册 `libsoup-3.0` + `souphttpsrc`（timeout=10s）；回归验证中 |
+| HLS | ⚠️ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes`；回归验证中 |
 
 ### 编解码
 
@@ -123,14 +123,16 @@ LatencyPlayerConfig.builder()
 
 ## 体积（2026-09 裁剪后）
 
-| 产物 | 裁剪前 | 现在 |
-|------|--------|------|
-| AAR（4 ABI） | 82 MB | **29.4 MB** |
-| `liblatencyplayer.so`（arm64，strip 后） | 46.9 MB | **17.6 MB** |
-| Demo APK（全 ABI） | 138 MB | **37.1 MB** |
-| 接入方 APK 增量（单 arm64） | - | 约 +17.6 MB |
+| 产物 | 裁剪前 | 1.0.0 | 1.0.1 |
+|------|--------|-------|-------|
+| AAR（4 ABI） | 82 MB | 29.4 MB | **34.1 MB** |
+| `liblatencyplayer.so`（arm64，strip 后） | 46.9 MB | 17.6 MB | **20.3 MB** |
+| Demo APK（全 ABI） | 138 MB | 37.1 MB | **44.7 MB** |
+| 接入方 APK 增量（单 arm64） | - | 约 +17.6 MB | 约 +20.3 MB |
 
-裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 18 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）。链接完整性由 `LINKER:--no-undefined` 强制校验。
+1.0.1 比 1.0.0 增加约 4.7 MB，来自新注册的插件栈：RTSP（`libgstrtsp` / `libgstsdp` / `libgstrtp` / `libgstrtpmanager`）、HTTP（`libsoup-3.0` / `libpsl` / `libnghttp2`）、HLS（`libgsthls` / `libgstmpegtsdemux` / `libgstisomp4` / `libgstaes`）、G.711 与 MP3（`libgstmulaw` / `libgstalaw` / `libgstmpg123`）。
+
+裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 29 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）。链接完整性由 `LINKER:--no-undefined` 强制校验。
 
 ---
 
@@ -145,7 +147,7 @@ maven {
 // 或开发期本地: maven { url = uri("file:///E:/Android-SDK/maven-repo") }
 
 // app/build.gradle.kts
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.0")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")
 ```
 
 发布（账密用 `-P` 传，不落库）：
@@ -163,7 +165,7 @@ rem 发到本机 ~/.m2
 gradlew :sdk:publishToMavenLocal
 ```
 
-版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（默认 `1.0.0`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
+版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.1`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
 
 > 本机 `~/.gradle` 若配了全局代理，内网 Nexus 需 `systemProp.http.nonProxyHosts=192.168.*`（项目 `gradle.properties` 已配）。
 > 完整接入代码（Manifest / 布局 / MainActivity / 混淆）见 [doc/MAVEN_INTEGRATION.md](doc/MAVEN_INTEGRATION.md)。
@@ -229,6 +231,7 @@ E:\Android-SDK\
 1. **快速 停止→播放 切换可能崩溃** —— 流线程 caps use-after-free（teardown 与 bus 回调竞态，栈在 `gst_caps_features_set_parent_refcount` / `gst_caps_push`）。修复中；**规避：停止后等状态回到 `STOPPED` 再 `start()`**。
 2. **ABI 暂时全量 4 个** —— arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 3. **测量时设备必须常亮** —— 息屏（Dozing）会让 Surface 停止渲染，截图全黑、延迟测量失效；已知问题曾因此被误判为「稳态延迟 ≥7s」。
+4. **HTTP-FLV / HLS 首次读可能挂起（1.0.1 待验证）** —— 曾定位到 `souphttpsrc` 收到 `HTTP 200` 后卡在 `gst_soup_http_src_read_buffer` 的 `g_cond_wait(session_cond)`，小响应（m3u8）正常、首个 body 读不到。1.0.1 加了 `souphttpsrc timeout=10` 与 src pad buffer 探针，**修复未经设备回归**；RTSP / HLS 同样未回归。
 
 已修复：稳态延迟误判（实测 ~125ms，见 [延迟](#延迟)）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
 
@@ -238,7 +241,7 @@ E:\Android-SDK\
 
 1. **`LatencyPlayerView` 不要设置不透明背景**（例如 `android:background="#000000"`），否则 Surface 洞被盖住会黑屏；View 内部已 `setBackgroundColor(0)` + `RGBA_8888`。
 2. 低延迟请同时使用 `.bufferTime(0)` 与 `.lowLatency(true)`。
-3. 能力以 **RTMP** 为主；HLS / HTTP-FLV / RTSP 未开启，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
+3. 能力以 **RTMP** 为主；RTSP / HTTP-FLV / HLS 自 1.0.1 起插件已注册但**尚在回归验证**（HTTP-FLV 曾出现 soup 首次读挂起），生产请优先 RTMP，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
 4. 改完配置必须再调一次 `setConfig()` 才生效。
 
 ---
