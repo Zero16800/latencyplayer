@@ -17,7 +17,7 @@ App 模块 `build.gradle.kts`：
 
 ```kotlin
 dependencies {
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.1")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.2")
 }
 ```
 
@@ -256,15 +256,17 @@ player.setCallback(new LatencyPlayerCallback() {
 | 首屏慢 | 用 `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)` |
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start |
-| HTTP-FLV / HLS 起播后无画面 | **已知问题（1.0.1 待回归）**：souphttpsrc 首次 body 读可能挂起；RTMP 不受影响 |
+| HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.2 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播通过，**HLS 直播（fMP4 多 variant）片段下载异常为已知问题**，见 README |
 
 ---
 
-## 产物体积（2026-09）
+## 产物体积（2026-10）
 
-- AAR（4 ABI）：**34.1 MB**（1.0.1；1.0.0 为 29.4 MB，裁剪前 82 MB）
-- arm64 `liblatencyplayer.so`：**20.3 MB**（1.0.1；1.0.0 为 17.6 MB，裁剪前 46.9 MB）
-- Demo APK：**44.7 MB**（全 ABI，1.0.1）
+- AAR（4 ABI）：**58.2 MB**（1.0.2；1.0.1 为 34.1 MB，裁剪前 82 MB）
+- arm64 `liblatencyplayer.so`：**32.3 MB**（1.0.2；1.0.1 为 20.3 MB，裁剪前 46.9 MB）
+- Demo APK：**67.2 MB**（全 ABI，1.0.2）
+
+> 1.0.2 体积增长来自 AAC 解码（`libgstlibav` + FFmpeg 静态库）与音频输出（`libgstopensles`）。
 
 ## 16 KB 页大小（Android 15+）
 

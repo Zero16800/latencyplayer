@@ -540,12 +540,19 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     g_object_set(ctx->pipeline, "uri", full_uri, NULL);
     g_free(full_uri);
 
-    // 启用last-sample以支持截图功能
-    g_object_set(ctx->pipeline, "enable-last-sample", TRUE, NULL);
+    // 启用last-sample以支持截图功能（appsink 属性，playbin 上可能不存在）
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                      "enable-last-sample")) {
+        g_object_set(ctx->pipeline, "enable-last-sample", TRUE, NULL);
+    }
 
     // 配置缓冲（0 也要写入：最低延迟）
-    g_object_set(ctx->pipeline, "buffer-time",
-                (gint64)(ctx->buffer_time_ms * GST_MSECOND), NULL);
+    // buffer-time 不是 playbin 属性，只在存在时设置
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                      "buffer-time")) {
+        g_object_set(ctx->pipeline, "buffer-time",
+                    (gint64)(ctx->buffer_time_ms * GST_MSECOND), NULL);
+    }
 
     // 配置音量
     g_object_set(ctx->pipeline, "volume", ctx->volume, NULL);
@@ -563,8 +570,11 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx->low_latency) {
         g_object_set(ctx->pipeline, "buffer-size", (gint64)0, NULL);
         g_object_set(ctx->pipeline, "buffer-duration", (gint64)(50 * GST_MSECOND), NULL);
-        g_object_set(ctx->pipeline, "buffer-time", (gint64)0, NULL);
-        LOGI("Low-latency playbin: buffer-size=0 buffer-duration=50ms buffer-time=0");
+        if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                          "buffer-time")) {
+            g_object_set(ctx->pipeline, "buffer-time", (gint64)0, NULL);
+        }
+        LOGI("Low-latency playbin: buffer-size=0 buffer-duration=50ms");
     }
 
     // 显式创建 video sink，避免 playbin 默认 sink 为 NULL / 无法挂窗口
@@ -902,8 +912,11 @@ int latency_player_set_buffer_time(LatencyPlayerContext *ctx, gint buffer_ms) {
     ctx->buffer_time_ms = CLAMP(buffer_ms, 0, 5000);
 
     if (ctx->pipeline != NULL) {
-        g_object_set(ctx->pipeline, "buffer-time",
-                    (gint64)(ctx->buffer_time_ms * GST_MSECOND), NULL);
+        if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                          "buffer-time")) {
+            g_object_set(ctx->pipeline, "buffer-time",
+                        (gint64)(ctx->buffer_time_ms * GST_MSECOND), NULL);
+        }
         if (ctx->low_latency) {
             g_object_set(ctx->pipeline, "buffer-duration", (gint64)0, NULL);
             g_object_set(ctx->pipeline, "buffer-size", (gint64)0, NULL);
@@ -923,7 +936,10 @@ int latency_player_set_low_latency(LatencyPlayerContext *ctx, gboolean enable) {
         if (enable) {
             g_object_set(ctx->pipeline, "buffer-size", (gint64)0, NULL);
             g_object_set(ctx->pipeline, "buffer-duration", (gint64)(50 * GST_MSECOND), NULL);
-            g_object_set(ctx->pipeline, "buffer-time", (gint64)0, NULL);
+            if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                              "buffer-time")) {
+                g_object_set(ctx->pipeline, "buffer-time", (gint64)0, NULL);
+            }
             tune_pipeline_queues(GST_BIN(ctx->pipeline));
 
             GstElement *source = NULL;
@@ -1062,15 +1078,29 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
     GstSample *sample = NULL;
 
     // 方法1：从playbin获取sample（需要enable-last-sample属性）
-    gboolean last_sample = FALSE;
-    g_object_get(ctx->pipeline, "enable-last-sample", &last_sample, NULL);
-
-    if (!last_sample) {
-        // 启用last-sample（这会增加一些内存开销）
-        g_object_set(ctx->pipeline, "enable-last-sample", TRUE, NULL);
+    // last-sample / sample 是 appsink 属性，不在 playbin 上。
+    // 优先取我们自己创建的 video_sink(appsink)，其次才是 pipeline。
+    GObject *sample_owner = NULL;
+    if (ctx->video_sink != NULL &&
+        g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->video_sink),
+                                     "sample")) {
+        sample_owner = G_OBJECT(ctx->video_sink);
+    } else if (g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->pipeline),
+                                            "sample")) {
+        sample_owner = G_OBJECT(ctx->pipeline);
     }
-
-    g_object_get(ctx->pipeline, "sample", &sample, NULL);
+    if (sample_owner == NULL) {
+        LOGW("No sample-capable element available for snapshot.");
+        return -1;
+    }
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(sample_owner),
+                                     "enable-last-sample")) {
+        gboolean last_sample = FALSE;
+        g_object_get(sample_owner, "enable-last-sample", &last_sample, NULL);
+        if (!last_sample)
+            g_object_set(sample_owner, "enable-last-sample", TRUE, NULL);
+    }
+    g_object_get(sample_owner, "sample", &sample);
 
     if (sample == NULL) {
         LOGW("Failed to get sample from pipeline. "
@@ -1493,7 +1523,10 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
 
     if (source == NULL) return;
 
-    gchar *source_name = gst_plugin_feature_get_name(
+    /* gst_plugin_feature_get_name() returns a const string owned by the
+     * plugin feature (transfer none) -- never g_free() it. Freeing it corrupts
+     * the allocator and later crashes on the next source-setup. */
+    const gchar *source_name = gst_plugin_feature_get_name(
         GST_PLUGIN_FEATURE(gst_element_get_factory(source)));
     LOGI("Source setup: %s", source_name);
 
@@ -1524,6 +1557,17 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
             guint lat = ctx->low_latency ? 80u : 200u;
             g_object_set(source, "latency", lat, NULL);
             LOGI("RTSP source configured: rtspsrc latency=%ums", lat);
+        }
+        /* rtspsrc defaults udp-buffer-size to 512KB. The kernel caps the UDP
+         * receive buffer at net.core.rmem_max, so gstudpsrc's forced
+         * SO_RCVBUFFORCE fallback always fails on Android (no CAP_NET_ADMIN)
+         * and its GError stays NULL, which crashes on opt_err->message.
+         * udp-buffer-size=0 leaves udpsrc's buffer-size at its 0 default, so
+         * the whole SO_RCVBUF/SO_RCVBUFFORCE block is skipped. */
+        if (g_strcmp0(source_name, "rtspsrc") == 0 &&
+            g_object_class_find_property(G_OBJECT_GET_CLASS(source), "udp-buffer-size")) {
+            g_object_set(source, "udp-buffer-size", 0, NULL);
+            LOGI("RTSP source configured: rtspsrc udp-buffer-size=0");
         }
     }
 
@@ -1558,8 +1602,6 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
         g_object_set(source, "latency", (guint64)0, NULL);
         LOGI("source latency forced to 0 (low-latency)");
     }
-
-    g_free(source_name);
 }
 
 static void on_video_decoder_changed(GstElement *element, GParamSpec *pspec, gpointer user_data) {

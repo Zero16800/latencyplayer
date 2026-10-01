@@ -8,13 +8,22 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
-/* GLib references __gnu_strerror_r from glibc */
-int __gnu_strerror_r(int errnum, char *buf, unsigned long buflen)
+/* GLib was configured against glibc's GNU strerror_r, which returns char*
+   (a pointer to buf or to a static string); bionic only ships the POSIX
+   variant that returns int. GLib therefore imports __gnu_strerror_r, and a
+   stub returning 0 made g_strerror() return NULL for every errno -- which
+   made g_set_error_literal() hit its message != NULL assertion, left the
+   GTask error unset, and hung the souphttpsrc read thread forever. */
+#include <string.h>
+char *__gnu_strerror_r(int errnum, char *buf, size_t buflen)
 {
-    (void)errnum;
-    if (buf && buflen > 0) buf[0] = '\0';
-    return 0;
+    if (buf == NULL || buflen == 0)
+        return "unknown error";
+    if (strerror_r(errnum, buf, buflen) != 0)
+        snprintf(buf, buflen, "Unknown error %d", errnum);
+    return buf;
 }
 
 /* Bionic lacks these glibc/libc symbols referenced by static glib/gio.

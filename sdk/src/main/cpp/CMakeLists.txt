@@ -88,6 +88,14 @@ set(CORE_ALLOW
     libxml2
     # audio decode paths (FLV/TS/RTP)
     libmpg123
+    # AAC decode (libgstlibav -> avdec_aac)
+    libavcodec
+    libavutil
+    libswresample
+    libavformat
+    libavfilter
+    libswscale
+    libbz2
 )
 
 set(CORE_LIST "")
@@ -97,6 +105,18 @@ foreach(lib ${GST_LIBS})
         list(APPEND CORE_LIST ${lib})
     endif()
 endforeach()
+
+# glib-networking TLS backend (openssl) lives under lib/gio/modules/ and is
+# therefore missed by the ${GST_LIB}/lib*.a glob. Without it GIO has no
+# GTlsBackend at all and every https:// request fails with
+# "TLS support is not available".
+set(GIO_OPENSSL_BACKEND ${GST_LIB}/gio/modules/libgioopenssl.a)
+if(EXISTS ${GIO_OPENSSL_BACKEND})
+    list(APPEND CORE_LIST ${GIO_OPENSSL_BACKEND})
+    message(STATUS "GIO TLS backend: ${GIO_OPENSSL_BACKEND}")
+else()
+    message(WARNING "GIO TLS backend NOT found: ${GIO_OPENSSL_BACKEND} - https:// will fail")
+endif()
 
 # Playback plugins (whole-archive for static registration).
 # RTMP + RTSP + HTTP-FLV + HLS.
@@ -123,6 +143,8 @@ set(PLUGIN_ALLOW
     libgstrtsp
     libgstrtp
     libgstrtpmanager
+    # udpsrc/udpsink for RTSP RTP transports (rtspsrc "failed to allocate udp ports" without it)
+    libgstudp
     # HTTP(S) source
     libgstsoup
     # HLS
@@ -130,10 +152,13 @@ set(PLUGIN_ALLOW
     libgstmpegtsdemux
     libgstisomp4
     libgstaes
-    # audio: G.711 (RTSP), MP3 (FLV/TS)
+    # audio: G.711 (RTSP), MP3 (FLV/TS), AAC (FLV/RTMP)
     libgstmulaw
     libgstalaw
     libgstmpg123
+    libgstlibav
+    # audio output (playbin autoaudiotestsrc -> openslessink)
+    libgstopensles
 )
 
 set(PLUGIN_LIST "")
@@ -165,10 +190,14 @@ target_link_libraries(latencyplayer PRIVATE
     ${CORE_LIST}
     ${CORE_LIST}
     "-Wl,--end-group"
-    android log c m dl EGL GLESv2 z
+    android log c m dl EGL GLESv2 z OpenSLES
     # openh264.a is C++; target is built as C so the C driver does not
     # auto-link the STL — add both archives explicitly.
     c++_static c++abi
+    # FFmpeg aarch64/arm asm references ff_tx_tab_* tables with non-GOT
+    # ADRP/ADD relocations; localizing them makes those relocs valid in
+    # a shared library (they are internal to libavutil anyway).
+    "-Wl,--version-script,${CMAKE_CURRENT_SOURCE_DIR}/ff_localize.map"
     "-Wl,--gc-sections"
     "-Wl,--no-undefined"
 )
