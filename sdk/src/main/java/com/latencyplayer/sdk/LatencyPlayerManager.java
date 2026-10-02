@@ -272,13 +272,14 @@ public class LatencyPlayerManager {
     }
 
     /**
-     * 截图
+     * 截图（编码并写入文件，PNG 或 JPEG 由 savePath 后缀决定）
      *
-     * @param savePath 截图保存路径
+     * @param savePath 截图保存路径，如 /sdcard/Download/snap.png
+     * @return true 表示文件已成功写入
      */
-    public void saveSnapshot(@NonNull String savePath) {
+    public boolean saveSnapshot(@NonNull String savePath) {
         checkInitialized();
-        nativeSaveSnapshot(nativeHandle, savePath);
+        return nativeSaveSnapshot(nativeHandle, savePath);
     }
 
     /**
@@ -531,7 +532,7 @@ public class LatencyPlayerManager {
 
     private native void nativeSetRotation(long handle, int degrees);
 
-    private native void nativeSaveSnapshot(long handle, String path);
+    private native boolean nativeSaveSnapshot(long handle, String path);
 
     private native void nativeRelease(long handle);
 }

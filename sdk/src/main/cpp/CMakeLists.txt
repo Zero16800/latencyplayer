@@ -19,12 +19,35 @@ set(LATENCY_PLAYER_SOURCES
     latency_player_core.c
     gstreamer_android.c
     gstreamer_stubs.c
+    # LatencyPlayer patch: deferred-overrun grace in decodebin so flvdemux's
+    # late video pad is not rejected after a multiqueue overrun expose.
+    # Compiled as a regular object so its gst_decode_bin_* symbols take
+    # precedence over the copy inside libgstplayback-1.0.a (linker sees
+    # objects before archives; --allow-multiple-definition tolerates both).
+    vendor/gstdecodebin2.c
+    # LatencyPlayer patch: check-full/overrun diagnostics (GST_DEBUG only).
+    # Same object-wins mechanism vs libgstcoreelements-1.0.a.
+    vendor/gstmultiqueue.c
 )
 
 add_library(latencyplayer SHARED ${LATENCY_PLAYER_SOURCES})
 
+target_compile_definitions(latencyplayer PRIVATE
+    # vendor/gstdecodebin2.c includes <glib/gi18n-lib.h> which hard-errors
+    # without GETTEXT_PACKAGE. Only *_(); gettext macro — no translation
+    # catalog is actually installed.
+    GETTEXT_PACKAGE=\"gstreamer-1.0\"
+)
+
+# vendor/gstmultiqueue.c includes <gst/glib-compat-private.h>, a private
+# header that the prebuilt SDK does not install. Shim it from vendor/.
+target_include_directories(latencyplayer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include-shim
+)
+
 target_include_directories(latencyplayer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GST_INCLUDE}
     ${GST_INCLUDE}/gstreamer-1.0
     ${GST_INCLUDE}/gstreamer-1.0/gst
     ${GST_INCLUDE}/glib-2.0
@@ -96,6 +119,9 @@ set(CORE_ALLOW
     libavfilter
     libswscale
     libbz2
+    # snapshot encode (pngenc/jpegenc)
+    libpng16
+    libjpeg
 )
 
 set(CORE_LIST "")
@@ -159,6 +185,9 @@ set(PLUGIN_ALLOW
     libgstlibav
     # audio output (playbin autoaudiotestsrc -> openslessink)
     libgstopensles
+    # snapshot file encode (pngenc / jpegenc)
+    libgstpng
+    libgstjpeg
 )
 
 set(PLUGIN_LIST "")

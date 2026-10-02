@@ -26,7 +26,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "LatencyPlayerDemo";
 
     private EditText etUrl;
-    private Button btnPlay, btnStop, btnPause, btnMute;
+    private Button btnPlay, btnStop, btnPause, btnMute, btnSnapshot;
     private LatencyPlayerView playerView;
     private TextView tvStatus;
 
@@ -48,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
         btnStop = findViewById(R.id.btn_stop);
         btnPause = findViewById(R.id.btn_pause);
         btnMute = findViewById(R.id.btn_mute);
+        btnSnapshot = findViewById(R.id.btn_snapshot);
         playerView = findViewById(R.id.player_view);
         tvStatus = findViewById(R.id.tv_status);
 
@@ -55,6 +56,7 @@ public class MainActivity extends AppCompatActivity {
         btnStop.setOnClickListener(v -> stopPlayback());
         btnPause.setOnClickListener(v -> pauseResume());
         btnMute.setOnClickListener(v -> toggleMute());
+        btnSnapshot.setOnClickListener(v -> takeSnapshot());
     }
 
     private void initPlayer() {
@@ -191,6 +193,25 @@ public class MainActivity extends AppCompatActivity {
         isMuted = !isMuted;
         playerManager.setMute(isMuted);
         btnMute.setText(isMuted ? "取消静音" : "静音");
+    }
+
+    private void takeSnapshot() {
+        if (playerManager == null) return;
+        java.io.File dir = getExternalFilesDir(null);
+        if (dir == null) dir = getFilesDir();
+        String path = new java.io.File(dir,
+                "snap_" + System.currentTimeMillis() + ".png").getAbsolutePath();
+        boolean ok;
+        try {
+            ok = playerManager.saveSnapshot(path);
+        } catch (Throwable t) {
+            Log.e(TAG, "Snapshot failed", t);
+            ok = false;
+        }
+        Log.i(TAG, "Snapshot " + (ok ? "saved to " : "FAILED: ") + path);
+        Toast.makeText(this, (ok ? "已保存: " : "截图失败: ") + path,
+                Toast.LENGTH_SHORT).show();
+        if (ok) updateStatus("截图: " + path);
     }
 
     private void updateStatus(String status) {

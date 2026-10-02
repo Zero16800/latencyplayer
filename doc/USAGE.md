@@ -137,8 +137,11 @@ player.switchUrl("rtmp://new-url/live/stream2");
 ### 截图
 
 ```java
-player.saveSnapshot("/sdcard/screenshot.png");
+boolean ok = player.saveSnapshot("/sdcard/screenshot.png");   // PNG（.png）
+boolean ok2 = player.saveSnapshot("/sdcard/screenshot.jpg");  // JPEG（.jpg/.jpeg，quality=90）
 ```
+
+编码器由路径后缀决定（`pngenc` / `jpegenc`），返回是否写入成功；无画面时返回 `false`。
 
 ### 翻转 / 旋转 / 方向
 
@@ -256,7 +259,8 @@ player.setCallback(new LatencyPlayerCallback() {
 | 首屏慢 | 用 `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)` |
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start |
-| HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.2 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播通过，**HLS 直播（fMP4 多 variant）片段下载异常为已知问题**，见 README |
+| HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.2 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播 + **直播均回归通过**（直播 raw 字节泄漏已修，见 README 已知问题 4） |
+| RTMP 只有声音无画面 | **1.0.2 已修复**（decodebin overrun 宽限补丁，本地回归 12/12），见 README 已知问题 5 |
 
 ---
 

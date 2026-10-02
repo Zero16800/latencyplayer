@@ -526,7 +526,7 @@ p.switchUrl("rtmp://new/live/stream2");           // 热切换 URL
 p.setMute(true);  p.setVolume(50);                // 静音/音量(0-100)
 p.setBufferTime(0);                               // 运行时改缓冲
 p.setFlip(true, false);  p.setRotation(90);       // 翻转/旋转
-p.saveSnapshot("/sdcard/a.png");                  // 截图
+p.saveSnapshot("/sdcard/a.png");                  // 截图（.jpg 则输出 JPEG，返回 boolean）
 p.isPlaying();  p.getState();                     // 状态查询
 p.release();                                      // 释放（onDestroy 必调）
 ```
@@ -563,10 +563,10 @@ p.release();                                      // 释放（onDestroy 必调�
 | 热切换 URL | ✅ | switchUrl |
 | 静音/音量 | ✅ | 0–100 |
 | 翻转/旋转 | ✅ | 水平/垂直翻转、0/90/180/270 |
-| 截图 | ⚠️ | API 已接，文件写入未实现 |
+| 截图 | ✅ | saveSnapshot(path)，PNG/JPEG 按后缀（pngenc/jpegenc），返回 boolean；真机验证 PNG/JPEG 均合法 |
 | 下载速度/码率回调 | ✅ | onDownloadSpeed |
 | 首帧/视频尺寸回调 | ✅ | 主线程回调 |
-| HLS / HTTP-FLV / RTSP | ✅ | 1.0.2 回归通过（RTSP / HTTP-FLV / HLS 点播）；HLS 直播见 README 已知问题 |
+| HLS / HTTP-FLV / RTSP | ✅ | 1.0.2 回归通过（RTSP / HTTP-FLV / HLS 点播 + HLS 直播出画） |
 | WebRTC | ❌ | 不支持 |
 
 ---

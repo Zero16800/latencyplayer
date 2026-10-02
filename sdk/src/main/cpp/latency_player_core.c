@@ -13,6 +13,7 @@
 #include <android/native_window_jni.h>
 #include <gst/app/app.h>
 #include <gst/video/video.h>
+#include <glib/gstdio.h>
 
 #define LOG_TAG "LatencyPlayerCore"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -70,8 +71,90 @@ static void tune_element_latency(GstElement *element, gpointer user_data);
 static void tune_pipeline_queues(GstBin *bin);
 static void on_deep_element_added(GstBin *bin, GstBin *sub_bin, GstElement *element,
                                   gpointer user_data);
+/* Walk upstream from a queue's sink pad. Returns TRUE while the data is still
+ * raw container bytes (source first) and FALSE once a demuxer/parser/decoder
+ * has framed it. Raw byte streams must never be leaked: dropping bytes
+ * corrupts the container stream for the demuxer (HLS fMP4 / FLV / TS). */
+static gboolean queue_carries_raw_bytes(GstElement *queue) {
+    GstPad *cur = gst_element_get_static_pad(queue, "sink");
+    gboolean framed = FALSE;
+    gint depth;
 
-/* Flatten queue/queue2/multiqueue so live RTMP does not sit on multi-second buffers. */
+    for (depth = 0; cur != NULL && depth < 32 && !framed; depth++) {
+        GstPad *peer = gst_pad_get_peer(cur);
+        GstElement *owner;
+        GstPad *next = NULL;
+
+        gst_object_unref(cur);
+        cur = NULL;
+        if (peer == NULL) break;
+
+        owner = gst_pad_get_parent_element(peer);
+        if (owner == NULL) {
+            gst_object_unref(peer);
+            break;
+        }
+
+        if (GST_IS_GHOST_PAD(peer)) {
+            GstPad *target = gst_ghost_pad_get_target(GST_GHOST_PAD(peer));
+            if (target != NULL) next = gst_object_ref(target);
+        } else if (GST_IS_BIN(owner)) {
+            gst_object_unref(owner);
+            gst_object_unref(peer);
+            break;
+        } else {
+            GstElementFactory *factory = gst_element_get_factory(owner);
+            const gchar *klass =
+                factory != NULL ? gst_element_factory_get_klass(factory) : NULL;
+
+            if (klass != NULL && (strstr(klass, "Demuxer") != NULL ||
+                                  strstr(klass, "Parser") != NULL ||
+                                  strstr(klass, "Decoder") != NULL ||
+                                  strstr(klass, "Depayloader") != NULL)) {
+                framed = TRUE;
+            } else if (GST_OBJECT_FLAG_IS_SET(owner, GST_ELEMENT_FLAG_SOURCE) ||
+                       (klass != NULL && strstr(klass, "Source") != NULL)) {
+                gst_object_unref(owner);
+                gst_object_unref(peer);
+                return TRUE;
+            } else {
+                next = gst_element_get_static_pad(owner, "sink");
+                if (next == NULL) {
+                    GstIterator *it = gst_element_iterate_sink_pads(owner);
+                    GValue v = G_VALUE_INIT;
+                    gboolean done = FALSE;
+                    while (!done) {
+                        switch (gst_iterator_next(it, &v)) {
+                        case GST_ITERATOR_OK:
+                            next = GST_PAD(g_value_dup_object(&v));
+                            g_value_reset(&v);
+                            done = TRUE;
+                            break;
+                        case GST_ITERATOR_RESYNC:
+                            gst_iterator_resync(it);
+                            break;
+                        default:
+                            done = TRUE;
+                            break;
+                        }
+                    }
+                    g_value_unset(&v);
+                    gst_iterator_free(it);
+                }
+            }
+        }
+        gst_object_unref(owner);
+        gst_object_unref(peer);
+        cur = next;
+    }
+    if (cur != NULL) gst_object_unref(cur);
+
+    /* Undecided (unlinked yet / walk ended): conservative = raw, never drop. */
+    return !framed;
+}
+
+/* Flatten queue/queue2/multiqueue so live RTMP does not sit on multi-second buffers.
+ */
 static void tune_element_latency(GstElement *element, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
     if (ctx == NULL || !ctx->low_latency || element == NULL) return;
@@ -86,7 +169,7 @@ static void tune_element_latency(GstElement *element, gpointer user_data) {
                      "max-size-buffers", 3,
                      "max-size-bytes", 0u,
                      "max-size-time", (guint64)(50 * GST_MSECOND),
-                     "leaky", 2, /* downstream: drop old when full */
+                     "leaky", queue_carries_raw_bytes(element) ? 0 : 2,
                      NULL);
         LOGI("low-latency tune queue %s", GST_OBJECT_NAME(element));
     } else if (g_strcmp0(fname, "queue2") == 0) {
@@ -98,10 +181,14 @@ static void tune_element_latency(GstElement *element, gpointer user_data) {
                      NULL);
         LOGI("low-latency tune queue2 %s", GST_OBJECT_NAME(element));
     } else if (g_strcmp0(fname, "multiqueue") == 0) {
+        /* Only shrink the buffer count. max-size-time/max-size-bytes stay at
+         * decodebin's defaults: the overrun-grace patch in gstdecodebin2.c
+         * raises them (1000/4MB/5s) to unblock flvdemux's push() and any
+         * later shrink here would re-collateralize the demuxer thread. The
+         * buffers setter refuses to drop below the current fill level, so
+         * the raise survives this tune. buffers=8 still bounds preroll. */
         g_object_set(element,
                      "max-size-buffers", 8,
-                     "max-size-bytes", 0u,
-                     "max-size-time", (guint64)(80 * GST_MSECOND),
                      NULL);
         if (g_object_class_find_property(G_OBJECT_GET_CLASS(element), "interleave-max-bytes")) {
             g_object_set(element, "interleave-max-bytes", 0u, NULL);
@@ -136,14 +223,17 @@ static void tune_pipeline_queues(GstBin *bin) {
                     if (g_strcmp0(fname, "queue") == 0) {
                         g_object_set(el, "max-size-buffers", 3, "max-size-bytes", 0u,
                                      "max-size-time", (guint64)(50 * GST_MSECOND),
-                                     "leaky", 2, NULL);
+                                     "leaky",
+                                     queue_carries_raw_bytes(el) ? 0 : 2, NULL);
                     } else if (g_strcmp0(fname, "queue2") == 0) {
                         g_object_set(el, "max-size-buffers", 3, "max-size-bytes", 0u,
                                      "max-size-time", (guint64)(50 * GST_MSECOND),
                                      "use-buffering", FALSE, NULL);
                     } else if (g_strcmp0(fname, "multiqueue") == 0) {
-                        g_object_set(el, "max-size-buffers", 8, "max-size-bytes", 0u,
-                                     "max-size-time", (guint64)(80 * GST_MSECOND), NULL);
+                        /* buffers only — see tune_element_latency(): shrinking
+                         * time/bytes here would undo the decodebin overrun
+                         * raise and re-block flvdemux. */
+                        g_object_set(el, "max-size-buffers", 8, NULL);
                     }
                     LOGI("walk-tune %s %s", fname, GST_OBJECT_NAME(el));
                 }
@@ -288,15 +378,29 @@ static gboolean draw_frame_to_window(LatencyPlayerContext *ctx,
 }
 
 static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data) {
+    static gboolean entered_logged = FALSE;
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    if (!entered_logged) {
+        entered_logged = TRUE;
+        LOGI("appsink new-sample: ENTERED (callback invoked)");
+    }
     GstSample *sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
-    if (sample == NULL) return GST_FLOW_ERROR;
+    if (sample == NULL) {
+        LOGI("appsink new-sample: pull NULL");
+        return GST_FLOW_ERROR;
+    }
 
     GstBuffer *buffer = gst_sample_get_buffer(sample);
     GstCaps *caps = gst_sample_get_caps(sample);
-    if (buffer != NULL && caps != NULL) {
+    if (buffer == NULL || caps == NULL) {
+        LOGI("appsink new-sample: buffer=%p caps=%p", buffer, caps);
+    } else {
         GstVideoInfo vinfo;
-        if (gst_video_info_from_caps(&vinfo, caps)) {
+        if (!gst_video_info_from_caps(&vinfo, caps)) {
+            gchar *cs = gst_caps_to_string(caps);
+            LOGI("appsink new-sample: video_info_from_caps FAILED %s", cs);
+            g_free(cs);
+        } else {
             GstMapInfo map;
             if (gst_buffer_map(buffer, &map, GST_MAP_READ)) {
                 int w = GST_VIDEO_INFO_WIDTH(&vinfo);
@@ -317,6 +421,8 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
                     LOGI("First frame post=%d (%dx%d)", posted, w, h);
                     latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
                 }
+            } else {
+                LOGI("appsink new-sample: gst_buffer_map READ failed");
             }
         }
     }
@@ -1063,23 +1169,13 @@ int latency_player_set_rotation(LatencyPlayerContext *ctx, gint degrees) {
 }
 
 int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
-    if (ctx == NULL || ctx->pipeline == NULL || path == NULL) return -1;
+    if (ctx == NULL || ctx->pipeline == NULL || path == NULL || path[0] == '\0')
+        return -1;
 
     LOGI("Saving snapshot to: %s", path);
 
-    // 方法：通过bus发送消息，触发截图
-    // 或者使用pipeline的last-sample属性（需要enable-last-sample=true）
-    // 这里使用一种更可靠的方法：通过GStreamer的截图API
-
-    // 确保pipeline已启用last-sample
-    // 注意：这需要在pipeline创建时设置 enable-last-sample=true
-
-    // 尝试获取当前帧的sample
+    /* last-sample 是 appsink/playbin 的属性，优先取我们创建的 video_sink */
     GstSample *sample = NULL;
-
-    // 方法1：从playbin获取sample（需要enable-last-sample属性）
-    // last-sample / sample 是 appsink 属性，不在 playbin 上。
-    // 优先取我们自己创建的 video_sink(appsink)，其次才是 pipeline。
     GObject *sample_owner = NULL;
     if (ctx->video_sink != NULL &&
         g_object_class_find_property(G_OBJECT_GET_CLASS(ctx->video_sink),
@@ -1090,7 +1186,7 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
         sample_owner = G_OBJECT(ctx->pipeline);
     }
     if (sample_owner == NULL) {
-        LOGW("No sample-capable element available for snapshot.");
+        LOGW("Snapshot: no sample-capable element available.");
         return -1;
     }
     if (g_object_class_find_property(G_OBJECT_GET_CLASS(sample_owner),
@@ -1103,40 +1199,99 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
     g_object_get(sample_owner, "sample", &sample);
 
     if (sample == NULL) {
-        LOGW("Failed to get sample from pipeline. "
-             "Make sure the pipeline is playing and has video output.");
+        LOGW("Snapshot: no frame yet (pipeline not playing or no video output).");
         return -1;
     }
 
-    // 获取sample中的buffer
     GstBuffer *buffer = gst_sample_get_buffer(sample);
-    if (buffer == NULL) {
+    GstCaps *caps = gst_sample_get_caps(sample);
+    if (buffer == NULL || caps == NULL || gst_caps_is_empty(caps)) {
+        LOGW("Snapshot: sample has no buffer/caps");
         gst_sample_unref(sample);
-        LOGW("Failed to get buffer from sample");
         return -1;
     }
 
-    // 获取caps信息
-    GstCaps *caps = gst_sample_get_caps(sample);
     GstStructure *s = gst_caps_get_structure(caps, 0);
     gint width = 0, height = 0;
     gst_structure_get_int(s, "width", &width);
     gst_structure_get_int(s, "height", &height);
-
     LOGI("Snapshot size: %dx%d", width, height);
 
-    // TODO: 将GstBuffer转换为图片文件
-    // 这需要额外的图像处理逻辑：
-    // 1. 从buffer中提取raw video data (YUV/RGB)
-    // 2. 转换为PNG/JPEG格式
-    // 3. 保存到文件
-    //
-    // 可以使用GStreamer的pngenc/jpegenc元素，或者使用stb_image等库
+    gchar *lower = g_ascii_strdown(path, -1);
+    gboolean is_jpeg = g_str_has_suffix(lower, ".jpg") ||
+                       g_str_has_suffix(lower, ".jpeg");
+    g_free(lower);
 
+    /* 临时管线: appsrc(帧) -> videoconvert(RGB) -> pngenc/jpegenc -> filesink。
+       location 走 g_object_set 而非解析字符串, 避免路径转义问题. */
+    gchar *desc = g_strdup_printf(
+        "appsrc name=src ! "
+        "videoconvert ! video/x-raw,format=RGB ! "
+        "%s ! filesink name=sink",
+        is_jpeg ? "jpegenc quality=90" : "pngenc");
+    GError *error = NULL;
+    GstElement *snap = gst_parse_launch(desc, &error);
+    g_free(desc);
+    if (snap == NULL) {
+        LOGW("Snapshot: pipeline build failed: %s",
+             error ? error->message : "unknown");
+        g_clear_error(&error);
+        gst_sample_unref(sample);
+        return -1;
+    }
+
+    GstElement *src = gst_bin_get_by_name(GST_BIN(snap), "src");
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(snap), "sink");
+    g_object_set(sink, "location", path, NULL);
+    g_object_set(src, "caps", caps, NULL);
+
+    gst_element_set_state(snap, GST_STATE_PLAYING);
+
+    /* push_buffer 获得 buffer 所有权, 先补一个引用; sample 持有原始引用 */
+    gst_buffer_ref(buffer);
+    GstFlowReturn flow = gst_app_src_push_buffer(GST_APP_SRC(src), buffer);
+    if (flow != GST_FLOW_OK)
+        LOGW("Snapshot: push_buffer flow=%s", gst_flow_get_name(flow));
+    gst_app_src_end_of_stream(GST_APP_SRC(src));
+
+    GstBus *bus = gst_element_get_bus(snap);
+    GstMessage *msg = gst_bus_timed_pop_filtered(bus, 5 * GST_SECOND,
+                                                 GST_MESSAGE_EOS |
+                                                 GST_MESSAGE_ERROR);
+    int ret = 0;
+    if (msg == NULL) {
+        LOGW("Snapshot: timeout waiting for encode EOS");
+        ret = -1;
+    } else if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
+        GError *err = NULL;
+        gchar *dbg = NULL;
+        gst_message_parse_error(msg, &err, &dbg);
+        LOGW("Snapshot: encode error: %s [%s]",
+             err ? err->message : "?", dbg ? dbg : "");
+        g_clear_error(&err);
+        g_free(dbg);
+        ret = -1;
+    }
+    if (msg) gst_message_unref(msg);
+    if (bus) gst_object_unref(bus);
+
+    gst_element_set_state(snap, GST_STATE_NULL);
+    gst_object_unref(snap);
+    gst_object_unref(src);
+    gst_object_unref(sink);
     gst_sample_unref(sample);
 
-    LOGI("Snapshot saved successfully (note: file write not implemented yet)");
-    return 0;
+    if (ret == 0) {
+        GStatBuf st;
+        if (g_stat(path, &st) != 0 || st.st_size <= 0) {
+            LOGW("Snapshot: file missing or empty: %s", path);
+            ret = -1;
+        } else {
+            LOGI("Snapshot saved: %s (%" G_GINT64_FORMAT " bytes)",
+                 path, (gint64)st.st_size);
+        }
+    }
+    return ret;
 }
 
 gint64 latency_player_get_position(LatencyPlayerContext *ctx) {
@@ -1336,10 +1491,31 @@ static GstBusSyncReply on_bus_sync(GstBus *bus, GstMessage *message, gpointer us
     return GST_BUS_PASS;
 }
 
+static gboolean message_is_from_current_pipeline(LatencyPlayerContext *ctx,
+                                                  GstMessage *msg) {
+    if (ctx->pipeline == NULL || msg->src == NULL) {
+        return FALSE;
+    }
+    if (!GST_IS_OBJECT(msg->src) || !GST_IS_OBJECT(ctx->pipeline)) {
+        return FALSE;
+    }
+    if (GST_MESSAGE_SRC(msg) == GST_OBJECT(ctx->pipeline)) {
+        return TRUE;
+    }
+    return gst_object_has_as_ancestor(msg->src, GST_OBJECT(ctx->pipeline));
+}
+
 static void on_error(GstBus *bus, GstMessage *msg, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
     GError *err = NULL;
     gchar *debug = NULL;
+
+    /* Drop errors emitted by a pipeline that was already replaced during
+       reconnect — a stale error must not abort the new attempt. */
+    if (!message_is_from_current_pipeline(ctx, msg)) {
+        LOGD("Ignoring error from stale pipeline element");
+        return;
+    }
 
     gst_message_parse_error(msg, &err, &debug);
 
@@ -1393,6 +1569,11 @@ static void on_error(GstBus *bus, GstMessage *msg, gpointer user_data) {
 
 static void on_eos(GstBus *bus, GstMessage *msg, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+
+    if (!message_is_from_current_pipeline(ctx, msg)) {
+        LOGD("Ignoring EOS from stale pipeline element");
+        return;
+    }
 
     LOGI("End of stream");
 

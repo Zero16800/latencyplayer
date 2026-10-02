@@ -34,18 +34,18 @@ player.start();
 | 翻转 / 旋转 | ✅ | 水平/垂直翻转、0/90/180/270 |
 | 下载速度 / 码率回调 | ✅ | `onDownloadSpeed` |
 | 首帧 / 视频尺寸回调 | ✅ | 主线程回调 |
-| 截图 | ⚠️ | API 已接，文件写入未实现 |
-| HLS / HTTP-FLV / RTSP | ✅ | 1.0.2 回归通过（RTSP / HTTP-FLV / HLS 点播）；HLS 直播见「已知问题」 |
+| 截图 | ✅ | `saveSnapshot(path)` PNG / JPEG 由路径后缀决定（`pngenc` / `jpegenc`），返回是否成功；真机验证 PNG 55.9KB、JPEG 50.1KB（`FFD8…FFD9` 合法） |
+| HLS / HTTP-FLV / RTSP | ✅ | 1.0.2 回归通过（RTSP / HTTP-FLV / HLS 点播 + HLS 直播 mediamtx fMP4，2/2 出画） |
 | WebRTC | ❌ | 不支持 |
 
 ### 协议
 
 | 协议 | 支持 | 说明 |
 |------|------|------|
-| RTMP / RTMPS | ✅ | 主路径；1.0.2 本地 mediamtx 直播回归通过（含 AAC 音轨） |
+| RTMP / RTMPS | ✅ | 主路径；1.0.2 本地 mediamtx 直播回归通过（含 AAC 音轨）；修复 decodebin 过早 expose 造成的**间歇性无视频**（本地回归 12/12 稳定） |
 | RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + RTP/SDP 栈，`latency=80/200ms`；1.0.2 回归通过 |
 | HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0` + `souphttpsrc`（timeout=10s）；1.0.2 回归通过（完整播完） |
-| HLS | ⚠️ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes`；1.0.2 点播回归通过，**直播（fMP4 多 variant）见「已知问题」** |
+| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes`；1.0.2 点播回归通过，**直播（fMP4 多 variant）回归通过**（修复见「已知问题」4） |
 
 ### 编解码
 
@@ -78,7 +78,7 @@ player.start();
 
 - 截图采集发生在时间窗**开头**（PNG 全量编码会把窗口拉到 1.8 s，取中点即虚高 ~900 ms，已改用 raw 规避），取中点仍系统性高估 ~100 ms；
 - 该值是「手机链路 − PC 参考链路」的相对量，双方网络路径与解码耗时未剥离；
-- 与配置的 `queue2 50ms + multiqueue 80ms ≈ 130 ms` 同量级，互为印证。
+- 与配置的 `queue2 50ms + multiqueue 8 缓冲上限` 同量级，互为印证。
 
 > 早期记录的「稳态 ≥7 s」是测量假象：测量期间设备息屏（Dozing）导致截图全黑、帧匹配失效。
 
@@ -97,9 +97,9 @@ LatencyPlayerConfig.builder()
 | 元素 | 参数 |
 |------|------|
 | `queue` / `queue2` | `max-size-buffers=3`、`max-size-time=50ms`、`max-size-bytes=0` |
-| `multiqueue` | `max-size-buffers=8`、`max-size-time=80ms`、`interleave-max-bytes=0` |
+| `multiqueue` | `max-size-buffers=8`、`interleave-max-bytes=0`（**不压缩** `max-size-time` / `max-size-bytes`——压扁这两项会让 decodebin 过早 expose 且无法被 overrun 宽限补丁抬回，见「已知问题」修复说明） |
 
-即**客户端侧缓冲合计 ~130 ms**，与上表稳态实测同量级；端到端剩余部分由服务端推流节奏与网络决定。
+即**客户端侧缓冲被压到 ~100ms 量级**，与上表稳态实测同量级；端到端剩余部分由服务端推流节奏与网络决定。
 
 ---
 
@@ -134,7 +134,7 @@ LatencyPlayerConfig.builder()
 
 1.0.2 比 1.0.1 增加约 24.1 MB，来自 AAC 解码（`libgstlibav`）连带的 FFmpeg 静态库（`libavcodec` / `libavutil` / `libswresample` / `libavformat` / `libavfilter` / `libswscale` / `libbz2`）与音频输出（`libgstopensles`）。
 
-裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 31 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）、`ff_localize.map` 把 FFmpeg `ff_*` 符号本地化以满足 PIC 链接。链接完整性由 `LINKER:--no-undefined` 强制校验。
+裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 34 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）、`ff_localize.map` 把 FFmpeg `ff_*` 符号本地化以满足 PIC 链接。链接完整性由 `LINKER:--no-undefined` 强制校验。
 
 ---
 
@@ -233,9 +233,10 @@ E:\Android-SDK\
 1. **快速 停止→播放 切换可能崩溃** —— 流线程 caps use-after-free（teardown 与 bus 回调竞态，栈在 `gst_caps_features_set_parent_refcount` / `gst_caps_push`）。修复中；**规避：停止后等状态回到 `STOPPED` 再 `start()`**。
 2. **ABI 暂时全量 4 个** —— arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 3. **测量时设备必须常亮** —— 息屏（Dozing）会让 Surface 停止渲染，截图全黑、延迟测量失效；已知问题曾因此被误判为「稳态延迟 ≥7s」。
-4. **HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）** —— First frame 能出，但 `qtdemux` 报 `atom bogus size`（收到非 MP4 数据）→ `adaptivedemux` 反复重启。服务端正常（ffmpeg 消费同一 mediamtx live HLS 无异常），HLS 点播回归通过，故非基础链路问题；`hlsdemux/adaptivedemux` 对 mediamtx live fMP4 的兼容性待排查。HTTP-FLV 首读挂起问题已在 1.0.2 回归中消除。
+4. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复并回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**设置 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流**不设 leaky**。HTTP-FLV 首读挂起问题已在 1.0.2 回归中消除。
+5. **RTMP 本地间歇性无视频（1.0.2 新发现，已修复）** —— 根因链：`multiqueue` 过早 overrun → `decodebin` expose 仅音频的群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 无法解析视频 tag → 迟到的 video pad 因「No current group」被永久丢弃。修复（vendored `gstdecodebin2.c` 补丁）：overrun 时先抬高 multiqueue 限额解阻 demuxer，再以 2500ms 宽限等待 video pad 加入后连同视频一起 expose；低延迟 tune 不再压缩 `multiqueue` 的 `max-size-time` / `max-size-bytes`（否则 async-done 会把抬限压回，demuxer 反复阻塞）。本地 mediamtx RTMP 回归 **12/12 稳定**（含宽限路径与自然完成路径两种时序的机制日志证据）。
 
-已修复：稳态延迟误判（实测 ~125ms，见 [延迟](#延迟)）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）。
+已修复：稳态延迟误判（实测 ~125ms，见 [延迟](#延迟)）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG）。
 
 ---
 
@@ -243,7 +244,7 @@ E:\Android-SDK\
 
 1. **`LatencyPlayerView` 不要设置不透明背景**（例如 `android:background="#000000"`），否则 Surface 洞被盖住会黑屏；View 内部已 `setBackgroundColor(0)` + `RGBA_8888`。
 2. 低延迟请同时使用 `.bufferTime(0)` 与 `.lowLatency(true)`。
-3. 能力以 **RTMP** 为主；RTSP / HTTP-FLV / HLS 点播已在 1.0.2 回归通过，HLS 直播（fMP4 多 variant）有已知问题，生产请优先 RTMP，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
+3. 能力以 **RTMP** 为主；RTSP / HTTP-FLV / HLS（点播 + 直播）已在 1.0.2 回归通过，生产请优先 RTMP，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
 4. 改完配置必须再调一次 `setConfig()` 才生效。
 
 ---

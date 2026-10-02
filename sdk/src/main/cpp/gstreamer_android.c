@@ -45,6 +45,9 @@ GST_PLUGIN_STATIC_DECLARE(alaw);
 GST_PLUGIN_STATIC_DECLARE(mpg123);
 GST_PLUGIN_STATIC_DECLARE(libav);
 GST_PLUGIN_STATIC_DECLARE(opensles);
+/* snapshot file encode (pngenc / jpegenc) */
+GST_PLUGIN_STATIC_DECLARE(png);
+GST_PLUGIN_STATIC_DECLARE(jpeg);
 
 /* Provide stderr/stdout/stdin symbols for GStreamer static libs */
 #include <stdio.h>
@@ -93,6 +96,8 @@ void gst_init_static_plugins(void)
     GST_PLUGIN_STATIC_REGISTER(mpg123);
     GST_PLUGIN_STATIC_REGISTER(libav);
     GST_PLUGIN_STATIC_REGISTER(opensles);
+    GST_PLUGIN_STATIC_REGISTER(png);
+    GST_PLUGIN_STATIC_REGISTER(jpeg);
 
     /* Prefer librtmp-based rtmpsrc over rtmp2src (better server compatibility;
        rtmp2src hangs on some servers waiting for S0+S1+S2). */

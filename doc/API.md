@@ -33,7 +33,7 @@ LatencyPlayer SDK 是基于 **GStreamer 1.28.7** 的 Android 直播播放器 SDK
 | `setVolume(int)` | 音量 0–100（配置内会 clamp） |
 | `setBufferTime(int)` | 运行时改缓冲时间 (ms)，范围 0–5000，0 = 最低延迟 |
 | `switchUrl(String)` | 热切换地址（内部 stop + play） |
-| `saveSnapshot(String)` | 截图保存路径 |
+| `saveSnapshot(String)` | 截图保存路径；`.png`→PNG、`.jpg`/`.jpeg`→JPEG(quality=90)，返回 `boolean` 是否成功 |
 | `setOrientation(int)` | 1=竖屏, 2=横屏 |
 | `setFlip(boolean, boolean)` | 水平 / 垂直翻转 |
 | `setRotation(int)` | 旋转 0 / 90 / 180 / 270 |

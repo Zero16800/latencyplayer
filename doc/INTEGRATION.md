@@ -224,7 +224,7 @@ gradlew.bat :app:assembleDebug --no-daemon
 
 Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 
-- 核心库与插件走**白名单**（`CORE_ALLOW` / `PLUGIN_ALLOW` 31 项），未列入的一律不链
+- 核心库与插件走**白名单**（`CORE_ALLOW` / `PLUGIN_ALLOW` 34 项），未列入的一律不链
 - 库必须经 `target_link_libraries`（放在 `.o` 之后）；`link_options`/`@rsp` 会排在 `.o` 前面导致 archive 拉不进符号
 - 库名匹配用 `NAME` + 去 `.a` 后缀（勿用 `NAME_WE`，会把 `libgstreamer-1.0.a` 截成 `libgstreamer-1`）
 - `LINKER:--no-undefined` 强制链接完整，未解析符号会在构建期报出
@@ -288,7 +288,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 **播放无声音 / 缺编解码**
 
-见下文能力表；插件走白名单（`PLUGIN_ALLOW` 31 项），未列入者不链。
+见下文能力表；插件走白名单（`PLUGIN_ALLOW` 34 项），未列入者不链。
 
 ## 8. 协议支持（当前实际）
 
@@ -299,7 +299,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 | RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src`。1.0.2 本地 mediamtx 直播回归通过（H.264 + AAC，opensles 出声） |
 | RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + `rtp`/`rtpmanager` + `gstrtsp`/`gstsdp`；`latency=80ms`（lowLatency）/ `200ms`。1.0.2 回归通过（First frame + PLAYING） |
 | HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0`（`souphttpsrc`，`timeout=10s`）。1.0.2 回归通过（完整播完，首次读挂起未复现） |
-| HLS | ⚠️ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。1.0.2 点播回归通过；**直播（fMP4 多 variant）见下方已知问题 5** |
+| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。1.0.2 点播 + **直播（mediamtx fMP4 双 variant）回归通过**（修复见已知问题 5） |
 | WebRTC | ❌ | 非本 SDK 能力；纯客户端 RTMP→WebRTC 不可行 |
 
 `tcp` 插件已注册，但**不等于** 已支持完整 HTTP 播放栈。
@@ -331,9 +331,10 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 2. **测量时设备必须常亮**：息屏（Dozing）会让 Surface 停止渲染、截图全黑，延迟测量失效（早期「稳态延迟 ≥7s」即由此误判；真机实测首帧 avg 491ms、稳态画面延迟中位 ~125ms，详见 [README 延迟](../README.md#延迟)）。
 3. **ABI 全量 4 个**：arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 4. ~~**HTTP-FLV 首次 body 读可能挂起（1.0.1 待验证）**~~ —— 1.0.2 回归通过：`souphttpsrc timeout=10` + src pad buffer 探针生效，HTTP-FLV 完整播完，未复现挂起。
-5. **HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**：First frame 能出，随后 `qtdemux` 报 `atom bogus size`（收到非 MP4 数据）、`adaptivedemux` 反复 `Error while downloading fragment` 重启。定位排除项：服务端正常（ffmpeg 消费同一 mediamtx live HLS 无异常）、HLS 点播回归通过（基础 hlsdemux/分片链路无回归）、走 LAN IP 与 adb reverse 均复现（非转发层问题）。待查方向：`hlsdemux/adaptivedemux` 对 mediamtx 直播 fMP4 双 variant（video/audio 分离 variant + `?session=` 查询参数）的兼容性。
+5. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复，回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**也设了 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复 `Error while downloading fragment` 重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流不设 `leaky`。
+6. ~~**RTMP 本地间歇性无视频（1.0.2 新发现）**~~ —— **已修复，本地回归 12/12 稳定**：`multiqueue` 低限额过早 overrun → `decodebin` expose 仅音频群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 解析不出视频 tag → 迟到 video pad 被 `No current group` 丢弃。修复（vendored `gstdecodebin2.c`）：overrun 时先抬高 multiqueue 限额（1000/4MB/5s）解阻 demuxer，再以 2500ms 宽限等待 video pad join 后连视频一起 expose；低延迟 tune 不再压缩 multiqueue 的 `max-size-time`/`max-size-bytes`，避免 async-done walk-tune 把抬限压回。
 
-已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）。
+已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG 按后缀）。
 
 ## 12. 许可证
 

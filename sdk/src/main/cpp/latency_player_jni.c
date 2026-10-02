@@ -313,6 +313,20 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
     g_setenv("GST_GL_API", "gles2", FALSE);
     g_setenv("GST_GL_PLATFORM", "egl", FALSE);
 
+    /* Optional lossless debug sink (read before gst_init_check, which
+       consumes GST_DEBUG_FILE during _priv_gst_debug_init):
+         adb shell setprop debug.latencyplayer.gstfile \
+           /sdcard/Android/data/<pkg>/files/gst.log
+       File output bypasses logcat chatty pruning entirely. */
+    {
+        char gst_file[PROP_VALUE_MAX];
+        if (__system_property_get("debug.latencyplayer.gstfile", gst_file) > 0 &&
+            gst_file[0] != '\0') {
+            g_setenv("GST_DEBUG_FILE", gst_file, TRUE);
+            LOGI("GST debug file enabled: %s", gst_file);
+        }
+    }
+
     /* Do NOT call gst_init_static_plugins() here. gst_init_check() invokes it
        itself once _gst_plugin_inited is set; calling it before init registers
        nothing (30 assertion failures) and calling it after init registers
@@ -600,21 +614,22 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetRotation(
 }
 
 /**
- * 保存截图
+ * 保存截图（成功返回 true）
  */
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSaveSnapshot(
     JNIEnv *env, jobject thiz, jlong handle, jstring path) {
 
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;
-    if (ctx == NULL || path == NULL) return;
+    if (ctx == NULL || path == NULL) return JNI_FALSE;
 
     const char *path_str = (*env)->GetStringUTFChars(env, path, NULL);
-    if (path_str == NULL) return;
+    if (path_str == NULL) return JNI_FALSE;
 
-    latency_player_save_snapshot(ctx, path_str);
+    int rc = latency_player_save_snapshot(ctx, path_str);
 
     (*env)->ReleaseStringUTFChars(env, path, path_str);
+    return rc == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 /**
