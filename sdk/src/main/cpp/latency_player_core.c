@@ -879,32 +879,46 @@ int latency_player_stop(LatencyPlayerContext *ctx) {
 }
 
 int latency_player_pause(LatencyPlayerContext *ctx) {
-    if (ctx == NULL || ctx->pipeline == NULL) return -1;
+    if (ctx == NULL) return -1;
 
     LOGD("Pausing playback");
 
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return -1;
+    }
     GstStateChangeReturn ret = gst_element_set_state(ctx->pipeline, GST_STATE_PAUSED);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         LOGE("Failed to pause");
+        g_mutex_unlock(&ctx->mutex);
         return -1;
     }
 
     ctx->is_playing = FALSE;
+    g_mutex_unlock(&ctx->mutex);
     return 0;
 }
 
 int latency_player_resume(LatencyPlayerContext *ctx) {
-    if (ctx == NULL || ctx->pipeline == NULL) return -1;
+    if (ctx == NULL) return -1;
 
     LOGD("Resuming playback");
 
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return -1;
+    }
     GstStateChangeReturn ret = gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         LOGE("Failed to resume");
+        g_mutex_unlock(&ctx->mutex);
         return -1;
     }
 
     ctx->is_playing = TRUE;
+    g_mutex_unlock(&ctx->mutex);
     return 0;
 }
 
@@ -991,11 +1005,13 @@ int latency_player_set_surface(LatencyPlayerContext *ctx, ANativeWindow *window)
 int latency_player_set_mute(LatencyPlayerContext *ctx, gboolean mute) {
     if (ctx == NULL) return -1;
 
+    g_mutex_lock(&ctx->mutex);
     ctx->is_muted = mute;
 
     if (ctx->pipeline != NULL) {
         g_object_set(ctx->pipeline, "mute", mute, NULL);
     }
+    g_mutex_unlock(&ctx->mutex);
 
     return 0;
 }
@@ -1003,11 +1019,13 @@ int latency_player_set_mute(LatencyPlayerContext *ctx, gboolean mute) {
 int latency_player_set_volume(LatencyPlayerContext *ctx, gdouble volume) {
     if (ctx == NULL) return -1;
 
+    g_mutex_lock(&ctx->mutex);
     ctx->volume = CLAMP(volume, 0.0, 1.0);
 
     if (ctx->pipeline != NULL) {
         g_object_set(ctx->pipeline, "volume", ctx->volume, NULL);
     }
+    g_mutex_unlock(&ctx->mutex);
 
     return 0;
 }
@@ -1015,6 +1033,7 @@ int latency_player_set_volume(LatencyPlayerContext *ctx, gdouble volume) {
 int latency_player_set_buffer_time(LatencyPlayerContext *ctx, gint buffer_ms) {
     if (ctx == NULL) return -1;
 
+    g_mutex_lock(&ctx->mutex);
     ctx->buffer_time_ms = CLAMP(buffer_ms, 0, 5000);
 
     if (ctx->pipeline != NULL) {
@@ -1028,6 +1047,7 @@ int latency_player_set_buffer_time(LatencyPlayerContext *ctx, gint buffer_ms) {
             g_object_set(ctx->pipeline, "buffer-size", (gint64)0, NULL);
         }
     }
+    g_mutex_unlock(&ctx->mutex);
 
     return 0;
 }
@@ -1035,6 +1055,7 @@ int latency_player_set_buffer_time(LatencyPlayerContext *ctx, gint buffer_ms) {
 int latency_player_set_low_latency(LatencyPlayerContext *ctx, gboolean enable) {
     if (ctx == NULL) return -1;
 
+    g_mutex_lock(&ctx->mutex);
     ctx->low_latency = enable;
     LOGI("Low-latency mode: %d", (int)enable);
 
@@ -1058,6 +1079,7 @@ int latency_player_set_low_latency(LatencyPlayerContext *ctx, gboolean enable) {
             }
         }
     }
+    g_mutex_unlock(&ctx->mutex);
 
     return 0;
 }
@@ -1169,10 +1191,20 @@ int latency_player_set_rotation(LatencyPlayerContext *ctx, gint degrees) {
 }
 
 int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
-    if (ctx == NULL || ctx->pipeline == NULL || path == NULL || path[0] == '\0')
+    if (ctx == NULL || path == NULL || path[0] == '\0')
         return -1;
 
     LOGI("Saving snapshot to: %s", path);
+
+    /* Take the sample under ctx->mutex: stop() unrefs ctx->video_sink and the
+       pipeline under this lock; reading them unlocked raced with teardown.
+       Only the acquisition phase is locked — the sample keeps its own refs,
+       so the (potentially multi-second) encode below runs unlocked. */
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return -1;
+    }
 
     /* last-sample 是 appsink/playbin 的属性，优先取我们创建的 video_sink */
     GstSample *sample = NULL;
@@ -1187,6 +1219,7 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
     }
     if (sample_owner == NULL) {
         LOGW("Snapshot: no sample-capable element available.");
+        g_mutex_unlock(&ctx->mutex);
         return -1;
     }
     if (g_object_class_find_property(G_OBJECT_GET_CLASS(sample_owner),
@@ -1196,7 +1229,9 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
         if (!last_sample)
             g_object_set(sample_owner, "enable-last-sample", TRUE, NULL);
     }
+
     g_object_get(sample_owner, "sample", &sample);
+    g_mutex_unlock(&ctx->mutex);
 
     if (sample == NULL) {
         LOGW("Snapshot: no frame yet (pipeline not playing or no video output).");
@@ -1295,22 +1330,38 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
 }
 
 gint64 latency_player_get_position(LatencyPlayerContext *ctx) {
-    if (ctx == NULL || ctx->pipeline == NULL) return -1;
+    if (ctx == NULL) return -1;
+
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return -1;
+    }
 
     gint64 position = 0;
     if (gst_element_query_position(ctx->pipeline, GST_FORMAT_TIME, &position)) {
+        g_mutex_unlock(&ctx->mutex);
         return position / GST_MSECOND; // 转换为毫秒
     }
+    g_mutex_unlock(&ctx->mutex);
     return -1;
 }
 
 gint64 latency_player_get_duration(LatencyPlayerContext *ctx) {
-    if (ctx == NULL || ctx->pipeline == NULL) return -1;
+    if (ctx == NULL) return -1;
+
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return -1;
+    }
 
     gint64 duration = 0;
     if (gst_element_query_duration(ctx->pipeline, GST_FORMAT_TIME, &duration)) {
+        g_mutex_unlock(&ctx->mutex);
         return duration / GST_MSECOND; // 转换为毫秒
     }
+    g_mutex_unlock(&ctx->mutex);
     return -1;
 }
 
@@ -1334,11 +1385,13 @@ int latency_player_switch_uri(LatencyPlayerContext *ctx, const char *uri) {
     // 停止当前播放
     latency_player_stop(ctx);
 
-    // 更新URI
+    // 更新URI (under lock: on_buffering reads ctx->uri under the same lock)
+    g_mutex_lock(&ctx->mutex);
     if (ctx->uri != NULL) {
         g_free(ctx->uri);
     }
     ctx->uri = g_strdup(uri);
+    g_mutex_unlock(&ctx->mutex);
 
     // 重新播放
     return latency_player_play(ctx, uri);
@@ -1510,10 +1563,16 @@ static void on_error(GstBus *bus, GstMessage *msg, gpointer user_data) {
     GError *err = NULL;
     gchar *debug = NULL;
 
+    /* Hold ctx->mutex: serializes against play/stop/set_surface tearing the
+       pipeline down — message_is_from_current_pipeline dereferences
+       ctx->pipeline, which stop() unrefs under the same lock. */
+    g_mutex_lock(&ctx->mutex);
+
     /* Drop errors emitted by a pipeline that was already replaced during
        reconnect — a stale error must not abort the new attempt. */
     if (!message_is_from_current_pipeline(ctx, msg)) {
         LOGD("Ignoring error from stale pipeline element");
+        g_mutex_unlock(&ctx->mutex);
         return;
     }
 
@@ -1565,13 +1624,16 @@ static void on_error(GstBus *bus, GstMessage *msg, gpointer user_data) {
 
     g_error_free(err);
     g_free(debug);
+    g_mutex_unlock(&ctx->mutex);
 }
 
 static void on_eos(GstBus *bus, GstMessage *msg, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
 
+    g_mutex_lock(&ctx->mutex);
     if (!message_is_from_current_pipeline(ctx, msg)) {
         LOGD("Ignoring EOS from stale pipeline element");
+        g_mutex_unlock(&ctx->mutex);
         return;
     }
 
@@ -1579,6 +1641,7 @@ static void on_eos(GstBus *bus, GstMessage *msg, gpointer user_data) {
 
     ctx->is_playing = FALSE;
     latency_player_send_message(ctx, GST_MSG_EOS, 0, 0);
+    g_mutex_unlock(&ctx->mutex);
 }
 
 static void on_state_changed(GstBus *bus, GstMessage *msg, gpointer user_data) {
@@ -1586,6 +1649,14 @@ static void on_state_changed(GstBus *bus, GstMessage *msg, gpointer user_data) {
     GstState old_state, new_state, pending_state;
 
     gst_message_parse_state_changed(msg, &old_state, &new_state, &pending_state);
+
+    /* Serialize with play/stop: stop() unrefs ctx->pipeline under this lock;
+       comparing/dereferencing it unlocked crashed against a concurrent stop. */
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return;
+    }
 
     // 只处理pipeline的状态变化
     if (GST_MESSAGE_SRC(msg) == GST_OBJECT(ctx->pipeline)) {
@@ -1602,6 +1673,7 @@ static void on_state_changed(GstBus *bus, GstMessage *msg, gpointer user_data) {
             latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
         }
     }
+    g_mutex_unlock(&ctx->mutex);
 }
 
 static void on_buffering(GstBus *bus, GstMessage *msg, gpointer user_data) {
@@ -1610,6 +1682,19 @@ static void on_buffering(GstBus *bus, GstMessage *msg, gpointer user_data) {
     (void)bus;
 
     gst_message_parse_buffering(msg, &percent);
+
+    /* Hold ctx->mutex across the whole handler: the live branch calls
+       set_state(PLAYING), which crashed when it raced latency_player_stop's
+       set_state(NULL) teardown (tombstone_06: SIGSEGV in playbin
+       activate_group via on_buffering). With the lock, stop() either
+       completes first (pipeline == NULL here → skip) or the handler runs
+       first on a healthy pipeline. */
+    g_mutex_lock(&ctx->mutex);
+
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return;
+    }
 
     /* Live/RTMP: stay PLAYING; do NOT report intermediate queue2 percentages
        (live queue2 often sticks at ~20-35% and never reaches 100). */
@@ -1621,7 +1706,7 @@ static void on_buffering(GstBus *bus, GstMessage *msg, gpointer user_data) {
             LOGD("Buffering (live, ignore UI): %d%%", percent);
             last_log_time = now;
         }
-        if (ctx->pipeline != NULL && ctx->is_playing) {
+        if (ctx->is_playing) {
             gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
         }
         if (ctx->low_latency && percent > 0 && percent < 100) {
@@ -1631,17 +1716,19 @@ static void on_buffering(GstBus *bus, GstMessage *msg, gpointer user_data) {
         if (percent >= 100) {
             latency_player_send_message(ctx, GST_MSG_BUFFERING, 100, 0);
         }
+        g_mutex_unlock(&ctx->mutex);
         return;
     }
 
     LOGD("Buffering: %d%% (live=%d)", percent, ctx->is_live_source);
     latency_player_send_message(ctx, GST_MSG_BUFFERING, percent, 0);
 
-    if (percent < 100 && ctx->pipeline != NULL) {
+    if (percent < 100) {
         gst_element_set_state(ctx->pipeline, GST_STATE_PAUSED);
-    } else if (percent >= 100 && ctx->pipeline != NULL) {
+    } else {
         gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
     }
+    g_mutex_unlock(&ctx->mutex);
 }
 
 static void on_duration_changed(GstBus *bus, GstMessage *msg, gpointer user_data) {
@@ -1659,13 +1746,21 @@ static void on_async_done(GstBus *bus, GstMessage *msg, gpointer user_data) {
     (void)bus;
     (void)msg;
     LOGI("Pipeline async-done (preroll complete)");
+    /* Same lock discipline as on_buffering: tune walks ctx->pipeline, which
+       stop() frees under this lock. */
+    g_mutex_lock(&ctx->mutex);
+    if (ctx->pipeline == NULL) {
+        g_mutex_unlock(&ctx->mutex);
+        return;
+    }
     if (ctx->low_latency) {
         tune_pipeline_queues(GST_BIN(ctx->pipeline));
     }
     /* appsink: do not fake FIRST_FRAME — wait for real draw. */
-    if (!ctx->use_appsink && ctx->pipeline != NULL && ctx->is_playing) {
+    if (!ctx->use_appsink && ctx->is_playing) {
         latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
     }
+    g_mutex_unlock(&ctx->mutex);
 }
 
 static void on_video_size_changed(GstElement *element, gint width, gint height,
