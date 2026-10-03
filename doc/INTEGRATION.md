@@ -220,7 +220,7 @@ gradlew.bat :app:assembleDebug --no-daemon
 
 > 升级路径：未来切 NDK r28+ / AGP 8.5.1+ 后可删掉手写链接标志（r28 默认 16 KB，AGP 8.5.1+ 默认按 16 KB zip 对齐非压缩 so）。
 
-### 7.3 体积裁剪（2026-09 起，1.0.2 更新）
+### 7.3 体积裁剪（2026-09 起，1.0.3 更新）
 
 Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 
@@ -231,13 +231,13 @@ Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 - Bionic 缺失符号补桩（`gstreamer_stubs.c`）：`in6addr_any/loopback`、`getgrgid_r`、`fseeko64/ftello64`(32 位)、`__gnu_strerror_r`、84 个 `vk*`
 - FFmpeg 静态库（`libgstlibav` 连带）部分目标文件非 PIC，靠 `ff_localize.map` 版本脚本（`local: ff_*;`）把符号本地化后才能进 `.so`（否则 arm64 报 `R_AARCH64_ADR_PREL_PG_HI21 ... recompile with -fPIC`、x86_64 报 `R_X86_64_PC32`）
 
-结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ **58.2 MB（1.0.2）**，arm64 so 46.9→17.6→20.3→**32.3 MB**（strip 后）。
+结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ 58.2 MB（1.0.2）→ **59.6 MB（1.0.3）**，arm64 so 46.9→17.6→20.3→32.3→**33.1 MB**（strip 后）。
 
 > `in6addr_*` 桩不能 include `<netinet/in.h>`（头文件里声明为 static），需自定义结构体。
 
 ### 7.4 发布链路（Maven，当前主链路）
 
-SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `implementation("com.latencyplayer:latencyplayer-sdk:1.0.2")`）。
+SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `implementation("com.latencyplayer:latencyplayer-sdk:1.0.3")`）。
 
 ```bat
 set JAVA_HOME=E:\Android-SDK\jdk-17
@@ -253,7 +253,7 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon
 gradlew.bat :app:clean :app:assembleDebug --no-daemon
 ```
 
-版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.2）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
+版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.3）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
 
 > 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `sdk\build\outputs\aar\sdk-release.aar` 到 `app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
 
@@ -296,10 +296,10 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 | 协议 | 支持 | 说明 |
 |------|------|------|
-| RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src`。1.0.2 本地 mediamtx 直播回归通过（H.264 + AAC，opensles 出声） |
-| RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + `rtp`/`rtpmanager` + `gstrtsp`/`gstsdp`；`latency=80ms`（lowLatency）/ `200ms`。1.0.2 回归通过（First frame + PLAYING） |
-| HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0`（`souphttpsrc`，`timeout=10s`）。1.0.2 回归通过（完整播完，首次读挂起未复现） |
-| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。1.0.2 点播 + **直播（mediamtx fMP4 双 variant）回归通过**（修复见已知问题 5） |
+| RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src`。1.0.2 起 mediamtx 直播回归通过（H.264 + AAC，opensles 出声）；**1.0.3 修复** decodebin 过早 expose 造成的间歇性无视频（12/12 稳定） |
+| RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + `rtp`/`rtpmanager` + `gstrtsp`/`gstsdp`；`latency=80ms`（lowLatency）/ `200ms`。1.0.3 回归通过（First frame + PLAYING） |
+| HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0`（`souphttpsrc`，`timeout=10s`）。1.0.3 回归通过（完整播完，首次读挂起未复现） |
+| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。1.0.3 点播 + **直播（mediamtx fMP4 双 variant）回归通过**（**1.0.3 修复**，见已知问题 5） |
 | WebRTC | ❌ | 非本 SDK 能力；纯客户端 RTMP→WebRTC 不可行 |
 
 `tcp` 插件已注册，但**不等于** 已支持完整 HTTP 播放栈。
@@ -331,9 +331,9 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 2. **测量时设备必须常亮**：息屏（Dozing）会让 Surface 停止渲染、截图全黑，延迟测量失效（早期「稳态延迟 ≥7s」即由此误判；真机实测首帧 avg 491ms、稳态画面延迟中位 ~125ms，详见 [README 延迟](../README.md#延迟)）。
 3. **ABI 全量 4 个**：arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 4. ~~**HTTP-FLV 首次 body 读可能挂起（1.0.1 待验证）**~~ —— 1.0.2 回归通过：`souphttpsrc timeout=10` + src pad buffer 探针生效，HTTP-FLV 完整播完，未复现挂起。
-5. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复，回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**也设了 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复 `Error while downloading fragment` 重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流不设 `leaky`。
-6. ~~**RTMP 本地间歇性无视频（1.0.2 新发现）**~~ —— **已修复，本地回归 12/12 稳定**：`multiqueue` 低限额过早 overrun → `decodebin` expose 仅音频群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 解析不出视频 tag → 迟到 video pad 被 `No current group` 丢弃。修复（vendored `gstdecodebin2.c`）：overrun 时先抬高 multiqueue 限额（1000/4MB/5s）解阻 demuxer，再以 2500ms 宽限等待 video pad join 后连视频一起 expose；低延迟 tune 不再压缩 multiqueue 的 `max-size-time`/`max-size-bytes`，避免 async-done walk-tune 把抬限压回。
-7. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **已修复，压测 0 崩溃 0 死锁**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 `latency_player_stop()` 的 `set_state(NULL)` 并发，playbin `activate_group` 访问已释放对象（`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error/eos/state-changed/buffering/async-done）与 pause/resume/setter/查询/截图取帧统一持 `ctx->mutex`，与 play/stop/set_surface 同一把锁序列化。压测：HLS 直播 6 + RTMP 8 次带 buffering 的停止，全协议回归通过。
+5. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复并随 1.0.3 发布，回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**也设了 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复 `Error while downloading fragment` 重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流不设 `leaky`。
+6. ~~**RTMP 本地间歇性无视频（1.0.2 新发现）**~~ —— **1.0.3 已修复，本地回归 12/12 稳定**：`multiqueue` 低限额过早 overrun → `decodebin` expose 仅音频群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 解析不出视频 tag → 迟到 video pad 被 `No current group` 丢弃。修复（vendored `gstdecodebin2.c`）：overrun 时先抬高 multiqueue 限额（1000/4MB/5s）解阻 demuxer，再以 2500ms 宽限等待 video pad join 后连视频一起 expose；低延迟 tune 不再压缩 multiqueue 的 `max-size-time`/`max-size-bytes`，避免 async-done walk-tune 把抬限压回。
+7. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **1.0.3 已修复，压测 0 崩溃 0 死锁**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 `latency_player_stop()` 的 `set_state(NULL)` 并发，playbin `activate_group` 访问已释放对象（`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error/eos/state-changed/buffering/async-done）与 pause/resume/setter/查询/截图取帧统一持 `ctx->mutex`，与 play/stop/set_surface 同一把锁序列化。压测：HLS 直播 6 + RTMP 8 次带 buffering 的停止，全协议回归通过。
 
 已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG 按后缀）；播放中 stop×buffering 竞态 SIGSEGV。
 

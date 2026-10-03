@@ -17,7 +17,7 @@ App 模块 `build.gradle.kts`：
 
 ```kotlin
 dependencies {
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.2")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.3")
 }
 ```
 
@@ -260,16 +260,16 @@ player.setCallback(new LatencyPlayerCallback() {
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start（注意与「播放中停止×buffering SIGSEGV」不同，后者已修复） |
 | 播放中点停止偶发 SIGSEGV（playbin `activate_group` / fault `0xaaaaaaaa`） | **已修复**：`on_buffering` 等 bus handler 与 `stop()` 已用同一把 `ctx->mutex` 序列化；压测 HLS 直播 6 + RTMP 8 次带 buffering 的停止 0 崩溃，见 README 已知问题 6 |
-| HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.2 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播 + **直播均回归通过**（直播 raw 字节泄漏已修，见 README 已知问题 4） |
-| RTMP 只有声音无画面 | **1.0.2 已修复**（decodebin overrun 宽限补丁，本地回归 12/12），见 README 已知问题 5 |
+| HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.3 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播 + **直播均回归通过**（**1.0.3 修复**，见 README 已知问题 4） |
+| RTMP 只有声音无画面 | **1.0.3 已修复**（decodebin overrun 宽限补丁，本地回归 12/12），见 README 已知问题 5 |
 
 ---
 
 ## 产物体积（2026-10）
 
-- AAR（4 ABI）：**58.2 MB**（1.0.2；1.0.1 为 34.1 MB，裁剪前 82 MB）
-- arm64 `liblatencyplayer.so`：**32.3 MB**（1.0.2；1.0.1 为 20.3 MB，裁剪前 46.9 MB）
-- Demo APK：**67.2 MB**（全 ABI，1.0.2）
+- AAR（4 ABI）：**59.6 MB**（1.0.3；1.0.2 为 58.2 MB，1.0.1 为 34.1 MB，裁剪前 82 MB）
+- arm64 `liblatencyplayer.so`：**33.1 MB**（1.0.3；1.0.2 为 32.3 MB，1.0.1 为 20.3 MB，裁剪前 46.9 MB）
+- Demo APK：**68.7 MB**（全 ABI，1.0.3）
 
 > 1.0.2 体积增长来自 AAC 解码（`libgstlibav` + FFmpeg 静态库）与音频输出（`libgstopensles`）。
 

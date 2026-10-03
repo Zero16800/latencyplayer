@@ -35,17 +35,17 @@ player.start();
 | 下载速度 / 码率回调 | ✅ | `onDownloadSpeed` |
 | 首帧 / 视频尺寸回调 | ✅ | 主线程回调 |
 | 截图 | ✅ | `saveSnapshot(path)` PNG / JPEG 由路径后缀决定（`pngenc` / `jpegenc`），返回是否成功；真机验证 PNG 55.9KB、JPEG 50.1KB（`FFD8…FFD9` 合法） |
-| HLS / HTTP-FLV / RTSP | ✅ | 1.0.2 回归通过（RTSP / HTTP-FLV / HLS 点播 + HLS 直播 mediamtx fMP4，2/2 出画） |
+| HLS / HTTP-FLV / RTSP | ✅ | 1.0.3 回归通过（RTSP / HTTP-FLV / HLS 点播 + HLS 直播 mediamtx fMP4，2/2 出画） |
 | WebRTC | ❌ | 不支持 |
 
 ### 协议
 
 | 协议 | 支持 | 说明 |
 |------|------|------|
-| RTMP / RTMPS | ✅ | 主路径；1.0.2 本地 mediamtx 直播回归通过（含 AAC 音轨）；修复 decodebin 过早 expose 造成的**间歇性无视频**（本地回归 12/12 稳定） |
-| RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + RTP/SDP 栈，`latency=80/200ms`；1.0.2 回归通过 |
-| HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0` + `souphttpsrc`（timeout=10s）；1.0.2 回归通过（完整播完） |
-| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes`；1.0.2 点播回归通过，**直播（fMP4 多 variant）回归通过**（修复见「已知问题」4） |
+| RTMP / RTMPS | ✅ | 主路径；1.0.2 本地 mediamtx 直播回归通过（含 AAC 音轨）；**1.0.3 修复** decodebin 过早 expose 造成的**间歇性无视频**（本地回归 12/12 稳定） |
+| RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + RTP/SDP 栈，`latency=80/200ms`；1.0.3 回归通过 |
+| HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0` + `souphttpsrc`（timeout=10s）；1.0.3 回归通过（完整播完） |
+| HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes`；1.0.3 点播 + **直播（fMP4 多 variant）回归通过**（**1.0.3 修复**，见「已知问题」4） |
 
 ### 编解码
 
@@ -123,16 +123,18 @@ LatencyPlayerConfig.builder()
 
 ## 体积（2026-10 裁剪后）
 
-| 产物 | 裁剪前 | 1.0.0 | 1.0.1 | 1.0.2 |
-|------|--------|-------|-------|-------|
-| AAR（4 ABI） | 82 MB | 29.4 MB | 34.1 MB | **58.2 MB** |
-| `liblatencyplayer.so`（arm64，strip 后） | 46.9 MB | 17.6 MB | 20.3 MB | **32.3 MB** |
-| Demo APK（全 ABI） | 138 MB | 37.1 MB | 44.7 MB | **67.2 MB** |
-| 接入方 APK 增量（单 arm64） | - | 约 +17.6 MB | 约 +20.3 MB | 约 +32.3 MB |
+| 产物 | 裁剪前 | 1.0.0 | 1.0.1 | 1.0.2 | 1.0.3 |
+|------|--------|-------|-------|-------|-------|
+| AAR（4 ABI） | 82 MB | 29.4 MB | 34.1 MB | 58.2 MB | **59.6 MB** |
+| `liblatencyplayer.so`（arm64，strip 后） | 46.9 MB | 17.6 MB | 20.3 MB | 32.3 MB | **33.1 MB** |
+| Demo APK（全 ABI） | 138 MB | 37.1 MB | 44.7 MB | 67.2 MB | **68.7 MB** |
+| 接入方 APK 增量（单 arm64） | - | 约 +17.6 MB | 约 +20.3 MB | 约 +32.3 MB | 约 +33.1 MB |
 
 1.0.1 比 1.0.0 增加约 4.7 MB，来自新注册的插件栈：RTSP（`libgstrtsp` / `libgstsdp` / `libgstrtp` / `libgstrtpmanager`）、HTTP（`libsoup-3.0` / `libpsl` / `libnghttp2`）、HLS（`libgsthls` / `libgstmpegtsdemux` / `libgstisomp4` / `libgstaes`）、G.711 与 MP3（`libgstmulaw` / `libgstalaw` / `libgstmpg123`）。
 
 1.0.2 比 1.0.1 增加约 24.1 MB，来自 AAC 解码（`libgstlibav`）连带的 FFmpeg 静态库（`libavcodec` / `libavutil` / `libswresample` / `libavformat` / `libavfilter` / `libswscale` / `libbz2`）与音频输出（`libgstopensles`）。
+
+1.0.3 比 1.0.2 增加约 1.4 MB，来自 1.0.2 发版后修复的 native 代码（vendored `gstdecodebin2.c` 补丁、HLS queue raw-bytes 判断、stop×buffering 竞态加锁）及调试信息。
 
 裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 34 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）、`ff_localize.map` 把 FFmpeg `ff_*` 符号本地化以满足 PIC 链接。链接完整性由 `LINKER:--no-undefined` 强制校验。
 
@@ -149,7 +151,7 @@ maven {
 // 或开发期本地: maven { url = uri("file:///E:/Android-SDK/maven-repo") }
 
 // app/build.gradle.kts
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.2")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.3")
 ```
 
 发布（账密用 `-P` 传，不落库）：
@@ -167,7 +169,7 @@ rem 发到本机 ~/.m2
 gradlew :sdk:publishToMavenLocal
 ```
 
-版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.2`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
+版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.3`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
 
 > 本机 `~/.gradle` 若配了全局代理，内网 Nexus 需 `systemProp.http.nonProxyHosts=192.168.*`（项目 `gradle.properties` 已配）。
 > 完整接入代码（Manifest / 布局 / MainActivity / 混淆）见 [doc/MAVEN_INTEGRATION.md](doc/MAVEN_INTEGRATION.md)。
@@ -233,9 +235,9 @@ E:\Android-SDK\
 1. **快速 停止→播放 切换可能崩溃** —— 流线程 caps use-after-free（teardown 与 bus 回调竞态，栈在 `gst_caps_features_set_parent_refcount` / `gst_caps_push`）。修复中；**规避：停止后等状态回到 `STOPPED` 再 `start()`**。
 2. **ABI 暂时全量 4 个** —— arm64-only 精简策略待拍板（可再省约 2/3 体积）。
 3. **测量时设备必须常亮** —— 息屏（Dozing）会让 Surface 停止渲染，截图全黑、延迟测量失效；已知问题曾因此被误判为「稳态延迟 ≥7s」。
-4. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复并回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**设置 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流**不设 leaky**。HTTP-FLV 首读挂起问题已在 1.0.2 回归中消除。
-5. **RTMP 本地间歇性无视频（1.0.2 新发现，已修复）** —— 根因链：`multiqueue` 过早 overrun → `decodebin` expose 仅音频的群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 无法解析视频 tag → 迟到的 video pad 因「No current group」被永久丢弃。修复（vendored `gstdecodebin2.c` 补丁）：overrun 时先抬高 multiqueue 限额解阻 demuxer，再以 2500ms 宽限等待 video pad 加入后连同视频一起 expose；低延迟 tune 不再压缩 `multiqueue` 的 `max-size-time` / `max-size-bytes`（否则 async-done 会把抬限压回，demuxer 反复阻塞）。本地 mediamtx RTMP 回归 **12/12 稳定**（含宽限路径与自然完成路径两种时序的机制日志证据）。
-6. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **已修复并压测通过**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 UI 线程 `latency_player_stop()` 的 `set_state(NULL)` 拆解并发，playbin `activate_group` 访问已释放对象（tombstone：`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error / eos / state-changed / buffering / async-done）与 pause / resume / setter / 位置查询 / 截图取帧统一持 `ctx->mutex`，与 play / stop / set_surface 同一把锁序列化——stop 先完成则 handler 见 `pipeline==NULL` 直接返回，否则 handler 在健康 pipeline 上先执行（无死锁：`set_state` 不等待 bus 分发，sync handler / appsink 回调不持此锁）。压测：HLS 直播 6 次 + RTMP 8 次带 buffering 活动的停止 0 崩溃 0 死锁，HLS 点播 / RTSP / 截图回归通过。
+4. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复并回归通过（2/2 出画，修复随 1.0.3 发布）**：根因是低延迟 `queue` tune 对**原始容器字节流**设置 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流**不设 leaky**。HTTP-FLV 首读挂起问题已在 1.0.2 回归中消除。
+5. **RTMP 本地间歇性无视频（1.0.2 新发现，1.0.3 已修复）** —— 根因链：`multiqueue` 过早 overrun → `decodebin` expose 仅音频的群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 无法解析视频 tag → 迟到的 video pad 因「No current group」被永久丢弃。修复（vendored `gstdecodebin2.c` 补丁）：overrun 时先抬高 multiqueue 限额解阻 demuxer，再以 2500ms 宽限等待 video pad 加入后连同视频一起 expose；低延迟 tune 不再压缩 `multiqueue` 的 `max-size-time` / `max-size-bytes`（否则 async-done 会把抬限压回，demuxer 反复阻塞）。本地 mediamtx RTMP 回归 **12/12 稳定**（含宽限路径与自然完成路径两种时序的机制日志证据）。
+6. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **已修复并压测通过（修复随 1.0.3 发布）**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 UI 线程 `latency_player_stop()` 的 `set_state(NULL)` 拆解并发，playbin `activate_group` 访问已释放对象（tombstone：`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error / eos / state-changed / buffering / async-done）与 pause / resume / setter / 位置查询 / 截图取帧统一持 `ctx->mutex`，与 play / stop / set_surface 同一把锁序列化——stop 先完成则 handler 见 `pipeline==NULL` 直接返回，否则 handler 在健康 pipeline 上先执行（无死锁：`set_state` 不等待 bus 分发，sync handler / appsink 回调不持此锁）。压测：HLS 直播 6 次 + RTMP 8 次带 buffering 活动的停止 0 崩溃 0 死锁，HLS 点播 / RTSP / 截图回归通过。
 
 已修复：稳态延迟误判（实测 ~125ms，见 [延迟](#延迟)）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG）；播放中 stop×buffering 竞态 SIGSEGV。
 
@@ -245,7 +247,7 @@ E:\Android-SDK\
 
 1. **`LatencyPlayerView` 不要设置不透明背景**（例如 `android:background="#000000"`），否则 Surface 洞被盖住会黑屏；View 内部已 `setBackgroundColor(0)` + `RGBA_8888`。
 2. 低延迟请同时使用 `.bufferTime(0)` 与 `.lowLatency(true)`。
-3. 能力以 **RTMP** 为主；RTSP / HTTP-FLV / HLS（点播 + 直播）已在 1.0.2 回归通过，生产请优先 RTMP，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
+3. 能力以 **RTMP** 为主；RTSP / HTTP-FLV / HLS（点播 + 直播）已在 1.0.3 回归通过，生产请优先 RTMP，见 [doc/INTEGRATION.md](doc/INTEGRATION.md)。
 4. 改完配置必须再调一次 `setConfig()` 才生效。
 
 ---
