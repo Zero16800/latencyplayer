@@ -10,8 +10,8 @@ android {
         applicationId = "com.latencyplayer.demo"
         minSdk = 21
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.0.3"
+        versionCode = 4
+        versionName = "1.0.4"
     }
 
     buildTypes {
@@ -31,7 +31,7 @@ android {
 }
 
 dependencies {
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.3")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.4")
     implementation("androidx.annotation:annotation:1.7.1")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")

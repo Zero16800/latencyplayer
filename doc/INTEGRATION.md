@@ -231,13 +231,13 @@ Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 - Bionic 缺失符号补桩（`gstreamer_stubs.c`）：`in6addr_any/loopback`、`getgrgid_r`、`fseeko64/ftello64`(32 位)、`__gnu_strerror_r`、84 个 `vk*`
 - FFmpeg 静态库（`libgstlibav` 连带）部分目标文件非 PIC，靠 `ff_localize.map` 版本脚本（`local: ff_*;`）把符号本地化后才能进 `.so`（否则 arm64 报 `R_AARCH64_ADR_PREL_PG_HI21 ... recompile with -fPIC`、x86_64 报 `R_X86_64_PC32`）
 
-结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ 58.2 MB（1.0.2）→ **59.6 MB（1.0.3）**，arm64 so 46.9→17.6→20.3→32.3→**33.1 MB**（strip 后）。
+结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ 58.2 MB（1.0.2）→ 59.6 MB（1.0.3，**1.0.4 持平**），arm64 so 46.9→17.6→20.3→32.3→33.1 MB（1.0.3，**1.0.4 持平**，strip 后）。
 
 > `in6addr_*` 桩不能 include `<netinet/in.h>`（头文件里声明为 static），需自定义结构体。
 
 ### 7.4 发布链路（Maven，当前主链路）
 
-SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `implementation("com.latencyplayer:latencyplayer-sdk:1.0.3")`）。
+SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `    implementation("com.latencyplayer:latencyplayer-sdk:1.0.4")`）。
 
 ```bat
 set JAVA_HOME=E:\Android-SDK\jdk-17
@@ -253,7 +253,7 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon
 gradlew.bat :app:clean :app:assembleDebug --no-daemon
 ```
 
-版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.3）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
+版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.4）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
 
 > 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `sdk\build\outputs\aar\sdk-release.aar` 到 `app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
 
@@ -334,7 +334,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 5. ~~**HLS 直播（fMP4 多 variant）片段下载异常（1.0.2 新发现）**~~ —— **已修复并随 1.0.3 发布，回归通过（2/2 出画）**：根因是低延迟 `queue` tune 对**原始容器字节流**也设了 `leaky`，丢字节导致 `qtdemux` 报 `atom bogus size` → `adaptivedemux` 反复 `Error while downloading fragment` 重启。修复：`queue_carries_raw_bytes()` 沿 sink pad 上游判断数据是否仍为 raw 容器字节（Demuxer/Parser 之前），raw 流不设 `leaky`。
 6. ~~**RTMP 本地间歇性无视频（1.0.2 新发现）**~~ —— **1.0.3 已修复，本地回归 12/12 稳定**：`multiqueue` 低限额过早 overrun → `decodebin` expose 仅音频群组 → flvdemux 线程阻塞在 `gst_data_queue_push()` 解析不出视频 tag → 迟到 video pad 被 `No current group` 丢弃。修复（vendored `gstdecodebin2.c`）：overrun 时先抬高 multiqueue 限额（1000/4MB/5s）解阻 demuxer，再以 2500ms 宽限等待 video pad join 后连视频一起 expose；低延迟 tune 不再压缩 multiqueue 的 `max-size-time`/`max-size-bytes`，避免 async-done walk-tune 把抬限压回。
 7. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **1.0.3 已修复，压测 0 崩溃 0 死锁**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 `latency_player_stop()` 的 `set_state(NULL)` 并发，playbin `activate_group` 访问已释放对象（`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error/eos/state-changed/buffering/async-done）与 pause/resume/setter/查询/截图取帧统一持 `ctx->mutex`，与 play/stop/set_surface 同一把锁序列化。压测：HLS 直播 6 + RTMP 8 次带 buffering 的停止，全协议回归通过。
-8. ~~**重复播放触发 ANR「没有响应」（1.0.3 发布后发现）**~~ —— **已修复（2026-10-04，待随 1.0.4 发布），压测 70 次播放 0 死亡 0 ANR**：主线程 `latency_player_play()` 持 `ctx->mutex` 拆解旧管线（`set_state(NULL)` 等 appsink 流线程退出渲染）与流线程 `on_appsink_new_sample → draw_frame_to_window` 等同一把 `ctx->mutex` 形成环形等待 → 主线程冻结、系统弹 ANR（复现于重复点播放第 4 次左右；`latency_player_play+252 = core.c:614` 卡在 `gst_base_sink_change_state → g_mutex_lock_slowpath`）。修复：新增 `window_mutex` 专护 `native_window`/`window_geo_*`，`draw_frame_to_window` 与 `prepare-window-handle` 只持此锁，`set_surface`/`release` 在 `ctx->mutex` 内嵌套持锁（锁序单向 `ctx->mutex → window_mutex`，不持 `window_mutex` 跨 `set_state`），流线程不再触碰 `ctx->mutex`。回归：RTMP 渲染冒烟、RTSP/HLS/HTTP-FLV 全通过（HLS 1920x1080 出画截图确认）。
+8. ~~**重复播放触发 ANR「没有响应」（1.0.3 发布后发现）**~~ —— **已修复（2026-10-04，随 1.0.4 发布），压测 70 次播放 0 死亡 0 ANR**：主线程 `latency_player_play()` 持 `ctx->mutex` 拆解旧管线（`set_state(NULL)` 等 appsink 流线程退出渲染）与流线程 `on_appsink_new_sample → draw_frame_to_window` 等同一把 `ctx->mutex` 形成环形等待 → 主线程冻结、系统弹 ANR（复现于重复点播放第 4 次左右；`latency_player_play+252 = core.c:614` 卡在 `gst_base_sink_change_state → g_mutex_lock_slowpath`）。修复：新增 `window_mutex` 专护 `native_window`/`window_geo_*`，`draw_frame_to_window` 与 `prepare-window-handle` 只持此锁，`set_surface`/`release` 在 `ctx->mutex` 内嵌套持锁（锁序单向 `ctx->mutex → window_mutex`，不持 `window_mutex` 跨 `set_state`），流线程不再触碰 `ctx->mutex`。回归：RTMP 渲染冒烟、RTSP/HLS/HTTP-FLV 全通过（HLS 1920x1080 出画截图确认）。
 
 已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG 按后缀）；播放中 stop×buffering 竞态 SIGSEGV；重复播放 ANR 死锁（draw 与主线程 teardown 互等 `ctx->mutex`）。
 
