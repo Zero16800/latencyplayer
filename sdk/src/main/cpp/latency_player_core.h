@@ -163,6 +163,10 @@ typedef struct LatencyPlayerContext {
     /** 互斥锁 */
     GMutex mutex;
 
+    /** 保护 native_window/geo 的专用锁：流线程(draw/prepare-window-handle)只拿这把，
+     *  ctx->mutex 再也不被流线程触碰；持有时绝不跨 gst set_state */
+    GMutex window_mutex;
+
     /** 下载速度统计 */
     gint64 total_bytes_downloaded;
     gint64 last_speed_check_time;

@@ -260,6 +260,7 @@ player.setCallback(new LatencyPlayerCallback() {
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start（注意与「播放中停止×buffering SIGSEGV」不同，后者已修复） |
 | 播放中点停止偶发 SIGSEGV（playbin `activate_group` / fault `0xaaaaaaaa`） | **已修复**：`on_buffering` 等 bus handler 与 `stop()` 已用同一把 `ctx->mutex` 序列化；压测 HLS 直播 6 + RTMP 8 次带 buffering 的停止 0 崩溃，见 README 已知问题 6 |
+| 重复播放后弹「没有响应」（ANR，播放中再点播放 / 快速停止→播放） | **已修复（待随 1.0.4 发布）**：流线程 `draw_frame_to_window` 曾在 appsink 回调里拿 `ctx->mutex`，与主线程 `play()` 持锁拆解旧管线互等 → 死锁 ANR；现 `native_window` 改专用 `window_mutex`，流线程不再碰 `ctx->mutex`。压测 70 次播放 0 ANR，见 README 已知问题 7 |
 | HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.3 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播 + **直播均回归通过**（**1.0.3 修复**，见 README 已知问题 4） |
 | RTMP 只有声音无画面 | **1.0.3 已修复**（decodebin overrun 宽限补丁，本地回归 12/12），见 README 已知问题 5 |
 

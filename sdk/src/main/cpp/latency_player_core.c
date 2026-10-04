@@ -298,10 +298,10 @@ static gboolean draw_frame_to_window(LatencyPlayerContext *ctx,
     if (ctx == NULL || src == NULL || src_w <= 0 || src_h <= 0) return FALSE;
 
     ANativeWindow *win = NULL;
-    g_mutex_lock(&ctx->mutex);
+    g_mutex_lock(&ctx->window_mutex);
     win = ctx->native_window;
     if (win != NULL) ANativeWindow_acquire(win);
-    g_mutex_unlock(&ctx->mutex);
+    g_mutex_unlock(&ctx->window_mutex);
     if (win == NULL) {
         LOGW("draw: no native_window");
         return FALSE;
@@ -583,6 +583,7 @@ int latency_player_init(LatencyPlayerContext *ctx, JavaVM *java_vm, jobject java
     ctx->initialized = TRUE;
 
     g_mutex_init(&ctx->mutex);
+    g_mutex_init(&ctx->window_mutex);
 
     LOGI("LatencyPlayer context initialized");
     return 0;
@@ -946,7 +947,9 @@ int latency_player_set_surface(LatencyPlayerContext *ctx, ANativeWindow *window)
         return 0;
     }
 
-    // 释放旧的window引用
+    // 释放旧的window引用 (window_mutex: 流线程 draw 每帧读 native_window，
+    // 写者必须与其同步；本段绝不包含 gst set_state)
+    g_mutex_lock(&ctx->window_mutex);
     if (ctx->native_window != NULL) {
         ANativeWindow_release(ctx->native_window);
         ctx->native_window = NULL;
@@ -959,6 +962,7 @@ int latency_player_set_surface(LatencyPlayerContext *ctx, ANativeWindow *window)
         ctx->native_window = window;
         LOGI("native_window acquired: %p", ctx->native_window);
     }
+    g_mutex_unlock(&ctx->window_mutex);
 
     /* glimagesink accepts a new window only in NULL/READY (GstVideoOverlay docs).
        appsink does not need READY bounce — just swap native_window. */
@@ -1435,11 +1439,13 @@ void latency_player_release(LatencyPlayerContext *ctx) {
         ctx->uri = NULL;
     }
 
-    // 释放Native Window
+    // 释放Native Window (window_mutex 与流线程 draw 同步)
+    g_mutex_lock(&ctx->window_mutex);
     if (ctx->native_window != NULL) {
         ANativeWindow_release(ctx->native_window);
         ctx->native_window = NULL;
     }
+    g_mutex_unlock(&ctx->window_mutex);
 
     // 释放video/audio sink
     if (ctx->video_sink != NULL) {
@@ -1467,6 +1473,7 @@ void latency_player_release(LatencyPlayerContext *ctx) {
 
     // 释放互斥锁
     g_mutex_clear(&ctx->mutex);
+    g_mutex_clear(&ctx->window_mutex);
 
     ctx->initialized = FALSE;
     LOGI("LatencyPlayer context released");
@@ -1533,9 +1540,15 @@ static GstBusSyncReply on_bus_sync(GstBus *bus, GstMessage *message, gpointer us
                    GST_IS_VIDEO_OVERLAY(ctx->video_sink)) {
             overlay = GST_VIDEO_OVERLAY(ctx->video_sink);
         }
-        if (overlay != NULL && ctx->native_window != NULL) {
-            gst_video_overlay_set_window_handle(overlay, (guintptr)ctx->native_window);
-            LOGI("prepare-window-handle: window set %p", ctx->native_window);
+        ANativeWindow *win = NULL;
+        if (ctx != NULL) {
+            g_mutex_lock(&ctx->window_mutex);
+            win = ctx->native_window;
+            g_mutex_unlock(&ctx->window_mutex);
+        }
+        if (overlay != NULL && win != NULL) {
+            gst_video_overlay_set_window_handle(overlay, (guintptr)win);
+            LOGI("prepare-window-handle: window set %p", win);
         } else {
             LOGW("prepare-window-handle: no window/overlay yet");
         }
