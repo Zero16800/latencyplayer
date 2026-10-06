@@ -465,6 +465,10 @@ struct _GstDecodeGroup
 #define OVERRUN_GRACE_MS        2500  /* first grace window (outlast a typical 1-2s GOP) */
 #define OVERRUN_GRACE_PAD_MS    300   /* re-arm when a pad joins during grace */
 #define OVERRUN_GRACE_MAX_MS    5000  /* absolute cap measured from the first request */
+#define OVERRUN_GRACE_VIDEO_MS  300   /* lone child is already video: only a brief
+                                       * window for a late audio pad (tags interleave
+                                       * within tens of ms); a video-only stream would
+                                       * otherwise burn the whole 2500 ms */
 
 static void overrun_grace_arm (GstDecodeGroup * group, guint grace_ms);
 static void overrun_grace_cancel (GstDecodeGroup * group);
@@ -3735,6 +3739,44 @@ overrun_grace_expired_cb (gpointer user_data)
   return G_SOURCE_REMOVE;
 }
 
+/* LatencyPlayer patch: media type of the group's single child chain, taken
+ * from the caps of the pad that spawned it (the demuxer srcpad). Returns
+ * "video"/"audio", or NULL when unknown. Used by multi_queue_overrun_cb to
+ * tell the two single-child cases apart: audio-first (must wait for the late
+ * VIDEO pad — this is the race the grace exists for) versus video-first or
+ * video-only (nothing worth waiting a full GOP for). */
+static const gchar *
+single_child_stream_type (GstDecodeGroup * group)
+{
+  GstDecodeChain *child;
+  GstCaps *caps;
+  const GstStructure *s;
+  const gchar *name, *type = NULL;
+
+  /* Same unlocked children access as the g_list_length() below. */
+  if (group->children == NULL || group->children->next != NULL)
+    return NULL;
+  child = group->children->data;
+  if (child == NULL || child->pad == NULL)
+    return NULL;
+  caps = gst_pad_get_current_caps (child->pad);
+  if (caps == NULL || gst_caps_is_empty (caps)) {
+    if (caps)
+      gst_caps_unref (caps);
+    return NULL;
+  }
+  s = gst_caps_get_structure (caps, 0);
+  name = gst_structure_get_name (s);
+  if (name != NULL) {
+    if (g_str_has_prefix (name, "video/"))
+      type = "video";
+    else if (g_str_has_prefix (name, "audio/"))
+      type = "audio";
+  }
+  gst_caps_unref (caps);
+  return type;
+}
+
 static void
 multi_queue_overrun_cb (GstElement * queue, GstDecodeGroup * group)
 {
@@ -3766,15 +3808,29 @@ multi_queue_overrun_cb (GstElement * queue, GstDecodeGroup * group)
   }
 
   /* LatencyPlayer patch: the demuxer thread was blocked in
-   * gst_data_queue_push() because this queue reported "full" (audio-only
-   * preroll limits). The raise above woke it; now it can parse the pending
-   * video tag. Wait for that pad to join the group (re-arming the grace)
-   * so we expose with video instead of the audio-only group. */
-  GST_DEBUG_OBJECT (dbin,
-      "Group %p overrun with a single child chain; deferring expose for up "
-      "to %d ms",
-      group, OVERRUN_GRACE_MS);
-  overrun_grace_arm (group, OVERRUN_GRACE_MS);
+   * gst_data_queue_push() because this queue reported "full" (preroll
+   * limits). The raise above woke it; now it can parse the pending tag.
+   * Only an AUDIO-first group is in the race this grace exists for: it
+   * must wait for the late VIDEO pad (up to a GOP), or after expose the
+   * video pad is rejected by gst_decode_chain_get_current_group() and the
+   * stream plays audio-only forever. A lone VIDEO chain (video-only
+   * stream, or audio still interleaving in) has no such race — stock code
+   * exposes it immediately, and for video-only sources flvdemux only
+   * signals no-more-pads for the never-arriving audio after 6 s, so
+   * waiting the full grace there just costs ~2.5 s of black screen.
+   * Keep a short window so a quickly interleaved audio pad still joins. */
+  {
+    const gchar *child_type = single_child_stream_type (group);
+    guint grace_ms = (child_type != NULL &&
+        g_strcmp0 (child_type, "video") == 0) ? OVERRUN_GRACE_VIDEO_MS
+        : OVERRUN_GRACE_MS;
+
+    GST_DEBUG_OBJECT (dbin,
+        "Group %p overrun with a single child chain (type=%s); deferring "
+        "expose for up to %u ms", group, child_type ? child_type : "unknown",
+        grace_ms);
+    overrun_grace_arm (group, grace_ms);
+  }
 }
 
 static void
