@@ -256,7 +256,7 @@ player.setCallback(new LatencyPlayerCallback() {
 |------|------|
 | 黑屏但状态 PLAYING | 检查布局是否给 `LatencyPlayerView` 设了不透明 background |
 | 初始化崩溃 | 确认 `GSTREAMER_ROOT_ANDROID`、ABI 与 so 已打进 APK |
-| 首屏慢 | 用 `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)` |
+| 首屏慢 | 用 `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)`。**起播首帧 ≈ 管线固定开销 ~0.3s + 等源流下一个关键帧（0~GOP，均值 GOP/2）**——实测本地 RTMP：源 GOP=1s 时首帧 avg 0.90s，源 GOP=0.2s 时 avg 0.355s；最有效手段是**缩短编码 GOP** / 服务器从关键帧快速起发（SDK 侧无法绕过关键帧等待） |
 | 连点「播放」崩溃 | 已修复（v 2026-09）；此前 video-sink 浮动引用会 double-free |
 | 快速 停止→播放 崩溃 | **已知问题**：流线程 caps use-after-free，修复中；规避方式是停止后等待状态回到 STOPPED 再 start（注意与「播放中停止×buffering SIGSEGV」不同，后者已修复） |
 | 播放中点停止偶发 SIGSEGV（playbin `activate_group` / fault `0xaaaaaaaa`） | **已修复**：`on_buffering` 等 bus handler 与 `stop()` 已用同一把 `ctx->mutex` 序列化；压测 HLS 直播 6 + RTMP 8 次带 buffering 的停止 0 崩溃，见 README 已知问题 6 |
