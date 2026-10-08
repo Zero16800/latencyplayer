@@ -28,6 +28,14 @@ set(LATENCY_PLAYER_SOURCES
     # LatencyPlayer patch: check-full/overrun diagnostics (GST_DEBUG only).
     # Same object-wins mechanism vs libgstcoreelements-1.0.a.
     vendor/gstmultiqueue.c
+    # LatencyPlayer patch: rtmpsrc unlock() must not call RTMP_Close() --
+    # librtmp frees r->m_vec while the streaming thread may still be in
+    # RTMP_ReadPacket (SIGSEGV fault 0x38 on stop/switch; seen with
+    # com.woned.daylong on 1.0.6). unlock() now only shutdown()s the
+    # socket; stop() does the full Close after the task has joined.
+    # Same object-wins mechanism vs libgstrtmp-1.0.a (whole-archive +
+    # --allow-multiple-definition; objects precede archives so ours wins).
+    vendor/rtmp/gstrtmpsrc.c
 )
 
 add_library(latencyplayer SHARED ${LATENCY_PLAYER_SOURCES})

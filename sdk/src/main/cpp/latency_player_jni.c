@@ -9,6 +9,7 @@
 #include <sys/system_properties.h>
 #include <android/native_window_jni.h>
 #include <pthread.h>
+#include <signal.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -283,6 +284,12 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
     }
 
     LOGI("Initializing GStreamer engine...");
+
+    /* RTMP teardown (rtmpsrc stop -> RTMP_Close -> SendDeleteStream) can
+       write to an already-shutdown socket and get EPIPE; without this the
+       default SIGPIPE action kills the whole app. Ignored process-wide,
+       which is standard practice for network code. */
+    signal(SIGPIPE, SIG_IGN);
 
     /* Must be set before the first g_log* call. */
     g_log_set_writer_func(glib_log_to_logcat, NULL, NULL);
