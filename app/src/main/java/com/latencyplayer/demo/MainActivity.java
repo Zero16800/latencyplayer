@@ -1,9 +1,13 @@
 package com.latencyplayer.demo;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -15,6 +19,10 @@ import com.latencyplayer.sdk.LatencyPlayerError;
 import com.latencyplayer.sdk.LatencyPlayerManager;
 import com.latencyplayer.sdk.LatencyPlayerState;
 import com.latencyplayer.sdk.LatencyPlayerView;
+
+import java.io.File;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * LatencyPlayer Demo Activity
@@ -28,10 +36,20 @@ public class MainActivity extends AppCompatActivity {
     private EditText etUrl;
     private Button btnPlay, btnStop, btnPause, btnMute, btnSnapshot;
     private LatencyPlayerView playerView;
+    private ImageView ivFreeze;
     private TextView tvStatus;
 
     private LatencyPlayerManager playerManager;
     private boolean isMuted = false;
+
+    // 冻结帧衔接：切换前抓最后一帧盖住画面，首帧到达后淡出，全程无黑屏
+    private volatile boolean hasFirstFrame;
+    private boolean startPending;
+    private final ExecutorService freezeExecutor = Executors.newSingleThreadExecutor();
+
+    private interface FreezeCallback {
+        void onCaptured(Bitmap bitmap);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
         btnMute = findViewById(R.id.btn_mute);
         btnSnapshot = findViewById(R.id.btn_snapshot);
         playerView = findViewById(R.id.player_view);
+        ivFreeze = findViewById(R.id.iv_freeze);
         tvStatus = findViewById(R.id.tv_status);
 
         btnPlay.setOnClickListener(v -> startPlayback());
@@ -98,6 +117,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(int errorCode, String message) {
                 Log.e(TAG, "Error: " + message);
+                // 出错/重连期间保留冻结画面（优于黑屏），下一次首帧回调再撤掉
                 updateStatus("错误: " + LatencyPlayerError.getDescription(errorCode));
                 Toast.makeText(MainActivity.this, "播放错误: " + message, Toast.LENGTH_SHORT).show();
             }
@@ -126,7 +146,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onFirstFrameRendered() {
                 Log.d(TAG, "First frame rendered");
+                hasFirstFrame = true;
                 updateStatus("播放中");
+                dismissFreeze();
             }
 
             @Override
@@ -165,16 +187,78 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请输入RTMP地址", Toast.LENGTH_SHORT).show();
             return;
         }
+        if (startPending) return;
 
         playerManager.getConfig().setUrl(url);
-        playerManager.start();
-        updateStatus("正在播放...");
+
+        if (playerManager.isPlaying() && hasFirstFrame) {
+            // 切换：先在后台抓取当前最后一帧并盖住画面，再拆旧管线，
+            // 这样拆旧/连新/等关键帧期间用户看到的是定格画面而不是黑屏
+            startPending = true;
+            captureLastFrame(bitmap -> {
+                if (!startPending) return; // 期间被停止，放弃本次切换
+                if (bitmap != null) showFreeze(bitmap);
+                hasFirstFrame = false;
+                startPending = false;
+                playerManager.start();
+                updateStatus("正在播放...");
+            });
+        } else {
+            hasFirstFrame = false;
+            playerManager.start();
+            updateStatus("正在播放...");
+        }
     }
 
     private void stopPlayback() {
         if (playerManager == null) return;
+        startPending = false; // 取消还在等待抓帧的切换
         playerManager.stop();
+        hideFreezeNow();
         updateStatus("已停止");
+    }
+
+    /** 后台抓取播放器当前最后一帧（appsink last-sample → PNG）。 */
+    private void captureLastFrame(FreezeCallback callback) {
+        freezeExecutor.execute(() -> {
+            Bitmap bitmap = null;
+            try {
+                File file = new File(getCacheDir(),
+                        "freeze_" + System.currentTimeMillis() + ".png");
+                if (playerManager.saveSnapshot(file.getAbsolutePath())) {
+                    bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                }
+                //noinspection ResultOfMethodCallIgnored
+                file.delete();
+            } catch (Throwable t) {
+                Log.e(TAG, "Capture last frame failed", t);
+            }
+            final Bitmap frame = bitmap;
+            runOnUiThread(() -> callback.onCaptured(frame));
+        });
+    }
+
+    private void showFreeze(Bitmap frame) {
+        ivFreeze.setAlpha(1f);
+        ivFreeze.setImageBitmap(frame);
+        ivFreeze.setVisibility(View.VISIBLE);
+    }
+
+    /** 新流首帧到达：120ms 淡出冻结帧，露出新画面。 */
+    private void dismissFreeze() {
+        if (ivFreeze.getVisibility() != View.VISIBLE) return;
+        ivFreeze.animate().alpha(0f).setDuration(120).withEndAction(() -> {
+            ivFreeze.setVisibility(View.GONE);
+            ivFreeze.setImageBitmap(null);
+            ivFreeze.setAlpha(1f);
+        }).start();
+    }
+
+    private void hideFreezeNow() {
+        ivFreeze.animate().cancel();
+        ivFreeze.setVisibility(View.GONE);
+        ivFreeze.setImageBitmap(null);
+        ivFreeze.setAlpha(1f);
     }
 
     private void pauseResume() {
@@ -231,6 +315,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        freezeExecutor.shutdownNow();
         if (playerManager != null) {
             try {
                 playerManager.release();

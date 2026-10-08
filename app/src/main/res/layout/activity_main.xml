@@ -94,12 +94,26 @@
         android:layout_width="match_parent"
         android:layout_height="16dp" />
 
-    <!-- 播放器视图 -->
+    <!-- 播放器视图（外层 FrameLayout 承载切换时的冻结帧覆盖层） -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
         <com.latencyplayer.sdk.LatencyPlayerView
             android:id="@+id/player_view"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_height="match_parent" />
+
+        <!-- 切换期间盖住上一帧，首帧到达后淡出，消除黑屏 -->
+        <ImageView
+            android:id="@+id/iv_freeze"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitXY"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
     <View
         android:layout_width="match_parent"
