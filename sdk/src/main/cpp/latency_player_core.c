@@ -1234,7 +1234,7 @@ int latency_player_save_snapshot(LatencyPlayerContext *ctx, const char *path) {
             g_object_set(sample_owner, "enable-last-sample", TRUE, NULL);
     }
 
-    g_object_get(sample_owner, "sample", &sample);
+    g_object_get(sample_owner, "sample", &sample, NULL);
     g_mutex_unlock(&ctx->mutex);
 
     if (sample == NULL) {
