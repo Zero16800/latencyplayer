@@ -171,7 +171,7 @@ rootProject.name = "YourApp"
 include(":app")
 ```
 
-### 2.2 app/build.gradle.kts
+### 2.2 android/app/build.gradle.kts
 
 ```kotlin
 plugins {
@@ -498,7 +498,7 @@ public class MainActivity extends AppCompatActivity {
 }
 ```
 
-### 2.6 混淆（app/proguard-rules.pro，开启 minify 时）
+### 2.6 混淆（android/app/proguard-rules.pro，开启 minify 时）
 
 SDK AAR 不含 consumer proguard 文件，开启代码混淆时需自行加：
 

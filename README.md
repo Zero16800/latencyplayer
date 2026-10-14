@@ -59,7 +59,7 @@ player.start();
 | AAC | - | ✅ libav `avdec_aac`（1.0.2 起注册 `libgstlibav`） |
 | Theora | ✅ | - |
 
-插件注册清单：`sdk/src/main/cpp/gstreamer_android.c`；链接白名单：`sdk/src/main/cpp/CMakeLists.txt`。
+插件注册清单：`android/sdk/src/main/cpp/gstreamer_android.c`；链接白名单：`android/sdk/src/main/cpp/CMakeLists.txt`。
 
 ---
 
@@ -152,7 +152,7 @@ maven {
 }
 // 或开发期本地: maven { url = uri("file:///E:/Android-SDK/maven-repo") }
 
-// app/build.gradle.kts
+// android/app/build.gradle.kts
 implementation("com.latencyplayer:latencyplayer-sdk:1.0.7")
 ```
 
@@ -213,11 +213,12 @@ gradlew.bat :app:assembleDebug --no-daemon
 
 ```
 E:\Android-SDK\
-├── sdk/          # SDK 库模块（对外发布为 com.latencyplayer:latencyplayer-sdk）
-├── app/          # Demo 应用
-├── doc/          # 文档
-├── gradle.properties   # GSTREAMER_ROOT_ANDROID / LATENCYPLAYER_VERSION
-└── settings.gradle.kts # rootProject: LatencyPlayerSDK
+├── android/           # Android 平台目录（Gradle 模块；ios/ 规划中）
+│   ├── sdk/           # SDK 库模块（对外发布为 com.latencyplayer:latencyplayer-sdk）
+│   └── app/           # Demo 应用
+├── doc/               # 文档
+├── gradle.properties  # GSTREAMER_ROOT_ANDROID / LATENCYPLAYER_VERSION
+└── settings.gradle.kts # rootProject: LatencyPlayerSDK（:sdk/:app 映射到 android/）
 ```
 
 ---

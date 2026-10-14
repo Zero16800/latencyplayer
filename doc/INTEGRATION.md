@@ -37,7 +37,7 @@ NDK-CMake-GStreamer\
 GSTREAMER_ROOT_ANDROID=E\:\\Android-SDK\\NDK-CMake-GStreamer
 ```
 
-或环境变量 `GSTREAMER_ROOT_ANDROID`。`sdk/build.gradle.kts` 会把该属性传给 CMake 的 `-DGSTREAMER_ROOT_ANDROID`。
+或环境变量 `GSTREAMER_ROOT_ANDROID`。`android/sdk/build.gradle.kts` 会把该属性传给 CMake 的 `-DGSTREAMER_ROOT_ANDROID`。
 
 官方下载：https://gstreamer.freedesktop.org/download/
 
@@ -53,7 +53,7 @@ implementation("com.latencyplayer:latencyplayer-sdk:1.0.7")
 
 **方式 B：本地 AAR**
 
-`app/build.gradle.kts`：
+`android/app/build.gradle.kts`：
 
 ```kotlin
 dependencies {
@@ -171,14 +171,15 @@ player.setConfig(config);
 
 ```
 LatencyPlayerSDK/
-├── sdk/                 # SDK 模块
-│   ├── src/main/java/   # Java API
-│   ├── src/main/cpp/    # Native (latency_player_*.c, gstreamer_android.c)
-│   └── build.gradle.kts
-├── app/                 # Demo
+├── android/             # Android 平台目录（ios/ 规划中）
+│   ├── sdk/             # SDK 模块
+│   │   ├── src/main/java/   # Java API
+│   │   ├── src/main/cpp/    # Native (latency_player_*.c, gstreamer_android.c)
+│   │   └── build.gradle.kts
+│   └── app/             # Demo
 ├── doc/                 # 文档
 ├── gradle.properties
-└── settings.gradle.kts
+└── settings.gradle.kts  # :sdk / :app 映射到 android/
 ```
 
 ## 7. 编译说明
@@ -222,7 +223,7 @@ gradlew.bat :app:assembleDebug --no-daemon
 
 ### 7.3 体积裁剪（2026-09 起，1.0.3 更新）
 
-Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
+Native 链接策略（`android/sdk/src/main/cpp/CMakeLists.txt`）：
 
 - 核心库与插件走**白名单**（`CORE_ALLOW` / `PLUGIN_ALLOW` 34 项），未列入的一律不链
 - 库必须经 `target_link_libraries`（放在 `.o` 之后）；`link_options`/`@rsp` 会排在 `.o` 前面导致 archive 拉不进符号
@@ -237,7 +238,7 @@ Native 链接策略（`sdk/src/main/cpp/CMakeLists.txt`）：
 
 ### 7.4 发布链路（Maven，当前主链路）
 
-SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`app/build.gradle.kts` → `    implementation("com.latencyplayer:latencyplayer-sdk:1.0.4")`）。
+SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`android/app/build.gradle.kts` → `    implementation("com.latencyplayer:latencyplayer-sdk:1.0.4")`）。
 
 ```bat
 set JAVA_HOME=E:\Android-SDK\jdk-17
@@ -255,7 +256,7 @@ gradlew.bat :app:clean :app:assembleDebug --no-daemon
 
 版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.7）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
 
-> 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `sdk\build\outputs\aar\sdk-release.aar` 到 `app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
+> 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `android\sdk\build\outputs\aar\sdk-release.aar` 到 `android\app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
 
 ### 7.5 常见问题
 
@@ -292,7 +293,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 ## 8. 协议支持（当前实际）
 
-以 `sdk/src/main/cpp/gstreamer_android.c` **已 STATIC_REGISTER** 的插件为准：
+以 `android/sdk/src/main/cpp/gstreamer_android.c` **已 STATIC_REGISTER** 的插件为准：
 
 | 协议 | 支持 | 说明 |
 |------|------|------|
@@ -316,7 +317,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 | AAC | - | ✅ libav `avdec_aac`（1.0.2 注册 `libgstlibav`） |
 | Theora | ✅ theora | - |
 
-插件注册列表见 `gstreamer_android.c`；链接集合见 `sdk/src/main/cpp/CMakeLists.txt`（白名单制：`CORE_ALLOW` + `PLUGIN_ALLOW`，无排除清单）。解码器 rank：`openh264dec = PRIMARY+1` 优先于 `avdec_h264 = MARGINAL`（1.0.2 起；曾因 avdec_h264 抢占导致 HLS/TS 解码报 `decode_slice_header error`）。
+插件注册列表见 `gstreamer_android.c`；链接集合见 `android/sdk/src/main/cpp/CMakeLists.txt`（白名单制：`CORE_ALLOW` + `PLUGIN_ALLOW`，无排除清单）。解码器 rank：`openh264dec = PRIMARY+1` 优先于 `avdec_h264 = MARGINAL`（1.0.2 起；曾因 avdec_h264 抢占导致 HLS/TS 解码报 `decode_slice_header error`）。
 
 ## 10. 渲染路径（摘要）
 

@@ -29,5 +29,10 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LatencyPlayerSDK"
+// Monorepo layout: platform code under android/ (ios/ to come). Project
+// names are kept (":sdk" / ":app") so task paths like
+// ":sdk:publishReleasePublicationToProjectLocalRepository" stay stable.
 include(":sdk")
+project(":sdk").projectDir = file("android/sdk")
 include(":app")
+project(":app").projectDir = file("android/app")
