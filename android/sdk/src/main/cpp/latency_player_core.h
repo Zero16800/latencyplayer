@@ -156,6 +156,33 @@ typedef struct LatencyPlayerContext {
     /** 是否已发送首帧 */
     gboolean first_frame_sent;
 
+    /** E2E 滞后测量：本次播放首帧渲染时的 PTS(ms) 与单调墙钟(us)，-1=未记录 */
+    gint64 lag_ref_pts_ms;
+    gint64 lag_ref_wall_us;
+    gint64 lag_last_log_us;
+
+    /** 网络侧收到的最大 PTS(ms)，-1=未记录；用于算 recv→render 管道积压 */
+    gint64 recv_max_pts_ms;
+
+    /** h264parse src（压缩视频）最大 PTS(ms)，-1=未记录；与 recv 对比可把
+     *  pipe_backlog 二分到 recv→demux 段 vs demux→sink 段 */
+    gint64 vparse_max_pts_ms;
+
+    /** flvdemux video src pad 最大 PTS(ms)，-1=未记录；纯视频、demux 后。
+     *  recv_max 若远大于此值 → recv 探针被音频 tag 虚增（假信号） */
+    gint64 vdemux_max_pts_ms;
+
+    /** flvdemux audio src pad 最大 PTS(ms)，-1=未记录；与 vdemux 对比可证
+     *  音视频 PTS 时钟偏差 */
+    gint64 ademux_max_pts_ms;
+
+    /** 启动追赶状态：落入直播边缘之外时丢弃旧帧追平（滞回避免抖动丢帧） */
+    gboolean catching_up;
+
+    /** 最近一次收到视频 sample 的单调墙钟(us)，-1=从未收到。后台/卡死看门狗
+     *  用它判断视频是否已停止流动（长时间后台被冻结后自恢复用） */
+    gint64 last_video_sample_wall_us;
+
     /** setBuffersGeometry 已应用的尺寸（避免每帧重设） */
     int window_geo_w;
     int window_geo_h;
@@ -206,6 +233,12 @@ int latency_player_resume(LatencyPlayerContext *ctx);
  * 设置Native Window (渲染目标)
  */
 int latency_player_set_surface(LatencyPlayerContext *ctx, ANativeWindow *window);
+
+/**
+ * 最近一次收到视频 sample 的年龄(ms)，-1=从未收到。
+ * 供上层看门狗判断后台/卡死时视频是否已停止流动以触发自恢复。
+ */
+gint64 latency_player_last_frame_age_ms(LatencyPlayerContext *ctx);
 
 /**
  * 设置静音

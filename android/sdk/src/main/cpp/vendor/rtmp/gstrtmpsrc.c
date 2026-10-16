@@ -68,6 +68,7 @@
 #include <winsock2.h>
 #else
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #endif
 
 GST_DEBUG_CATEGORY_STATIC (rtmpsrc_debug);
@@ -117,7 +118,7 @@ static gboolean gst_rtmp_src_query (GstBaseSrc * src, GstQuery * query);
 G_DEFINE_TYPE_WITH_CODE (GstRTMPSrc, gst_rtmp_src, GST_TYPE_PUSH_SRC,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_rtmp_src_uri_handler_init));
-GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtmpsrc, "rtmpsrc", GST_RANK_PRIMARY,
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtmpsrc, "rtmpsrc", GST_RANK_PRIMARY + 10,
     GST_TYPE_RTMP_SRC, rtmp_element_init (plugin));
 
 static void
@@ -190,6 +191,11 @@ gst_rtmp_src_init (GstRTMPSrc * rtmpsrc)
   rtmpsrc->timeout = DEFAULT_TIMEOUT;
 
   gst_base_src_set_format (GST_BASE_SRC (rtmpsrc), GST_FORMAT_TIME);
+  /* LatencyPlayer patch: RTMP is always a live source in this SDK. Without
+   * is-live, playbin does a full preroll (waits for decoded frame in sink
+   * before PLAYING), adding latency; with is-live the pipeline returns
+   * NO_PREROLL and starts streaming as soon as data flows. */
+  gst_base_src_set_live (GST_BASE_SRC (rtmpsrc), TRUE);
 }
 
 static void
@@ -356,6 +362,19 @@ gst_rtmp_src_create (GstPushSrc * pushsrc, GstBuffer ** buffer)
   }
 
   size = GST_BASE_SRC_CAST (pushsrc)->blocksize;
+
+  /* LatencyPlayer patch: periodic kernel recv-queue watermark to diagnose
+     E2E backlog (bytes queued but not yet pulled by librtmp). */
+  {
+    static gint64 last_io_log_us = 0;
+    gint64 now_us = g_get_monotonic_time ();
+    if (now_us - last_io_log_us > 2000000) {
+      last_io_log_us = now_us;
+      int pending = 0;
+      if (ioctl (src->rtmp->m_sb.sb_socket, FIONREAD, &pending) == 0)
+        GST_WARNING_OBJECT (src, "TIMING recvbuf_pending=%d bytes", pending);
+    }
+  }
 
   GST_DEBUG ("reading from %" G_GUINT64_FORMAT
       ", size %u", src->cur_offset, size);
@@ -606,6 +625,7 @@ success:
 static gboolean
 gst_rtmp_src_connect (GstRTMPSrc * src)
 {
+  gint64 t0 = g_get_monotonic_time ();
   RTMP_Init (src->rtmp);
   src->rtmp->Link.timeout = src->timeout;
   if (!RTMP_SetupURL (src->rtmp, src->uri)) {
@@ -618,12 +638,46 @@ gst_rtmp_src_connect (GstRTMPSrc * src)
 
   /* open if required */
   if (!RTMP_IsConnected (src->rtmp)) {
+    gint64 t1 = g_get_monotonic_time ();
     if (!RTMP_Connect (src->rtmp, NULL)) {
       GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
           ("Could not connect to RTMP stream \"%s\" for reading", src->uri));
       return FALSE;
     }
+    gint64 t2 = g_get_monotonic_time ();
+    GST_WARNING_OBJECT (src, "TIMING: RTMP_Connect took %" G_GINT64_FORMAT " us",
+        (t2 - t1));
+
+    /* LatencyPlayer patch: cap the kernel receive buffer. The default (up to
+     * tcp_rmem max ~6MB) lets the join burst fill megabytes that sync=TRUE
+     * then renders punctually at 1x -> multi-second E2E lag. 128KB bounds the
+     * backlog to <1s at typical live bitrates while still allowing ~10Mbps
+     * at 100ms RTT (window >= 4xBDP). */
+    {
+      int rcvbuf = 128 * 1024;
+      setsockopt (src->rtmp->m_sb.sb_socket, SOL_SOCKET, SO_RCVBUF,
+          &rcvbuf, sizeof (rcvbuf));
+      int got = 0;
+      socklen_t gotlen = sizeof (got);
+      getsockopt (src->rtmp->m_sb.sb_socket, SOL_SOCKET, SO_RCVBUF, &got,
+          &gotlen);
+      GST_WARNING_OBJECT (src, "SO_RCVBUF requested=%d actual=%d", rcvbuf, got);
+    }
   }
+
+  /* LatencyPlayer patch: explicitly send the PLAY command right after
+   * connect. Without this, the first RTMP_Read() implicitly starts the
+   * stream, adding ~200-500ms to first-frame latency. */
+  gint64 t3 = g_get_monotonic_time ();
+  if (!RTMP_ConnectStream (src->rtmp, 0)) {
+    GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
+        ("Could not connect to RTMP stream \"%s\" for reading", src->uri));
+    return FALSE;
+  }
+  gint64 t4 = g_get_monotonic_time ();
+  GST_WARNING_OBJECT (src,
+      "TIMING: RTMP_ConnectStream took %" G_GINT64_FORMAT " us, total connect %" G_GINT64_FORMAT " us",
+      (t4 - t3), (t4 - t0));
 
   return TRUE;
 }

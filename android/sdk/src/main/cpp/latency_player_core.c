@@ -155,6 +155,69 @@ static gboolean queue_carries_raw_bytes(GstElement *queue) {
 
 /* Flatten queue/queue2/multiqueue so live RTMP does not sit on multi-second buffers.
  */
+static guint vparse_probe_count = 0;
+
+/* flvdemux video/audio src pad PTS max: pure-stream post-demux watermarks.
+ * recv_max (rtmpsrc) sees ALL tags incl. audio; if recv_max >> vdemux_max,
+ * the recv watermark was inflated by audio-tag timestamps (fake backlog). */
+static GstPadProbeReturn log_vdemux_buffer(GstPad *pad, GstPadProbeInfo *info,
+                                           gpointer user_data) {
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (ctx != NULL && buf != NULL && GST_BUFFER_PTS_IS_VALID(buf)) {
+        gint64 pts = (gint64)(GST_BUFFER_PTS(buf) / GST_MSECOND);
+        gint64 *slot = (g_strrstr(GST_PAD_NAME(pad), "video") != NULL)
+            ? &ctx->vdemux_max_pts_ms : &ctx->ademux_max_pts_ms;
+        if (pts > *slot) *slot = pts;
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+static void on_flvdemux_pad_added(GstElement *demux, GstPad *pad,
+                                  gpointer user_data) {
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    if (caps == NULL) caps = gst_pad_query_caps(pad, NULL);
+    if (caps != NULL && gst_caps_get_size(caps) > 0) {
+        const GstStructure *s = gst_caps_get_structure(caps, 0);
+        const gchar *name = gst_structure_get_name(s);
+        gboolean is_video = name != NULL && g_str_has_prefix(name, "video/");
+        gboolean is_audio = name != NULL && g_str_has_prefix(name, "audio/");
+        if (is_video || is_audio) {
+            gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER,
+                              log_vdemux_buffer, ctx, NULL);
+            LOGI("demux %s probe on %s (%s)", is_video ? "video" : "audio",
+                 GST_PAD_NAME(pad), name ? name : "?");
+        }
+    }
+    if (caps != NULL) gst_caps_unref(caps);
+}
+
+/* Second measurement point: compressed video max PTS at h264parse src.
+ * recv probe (rtmpsrc) carries ALL stream bytes incl. audio tags and librtmp
+ * timestamp quirks; vparse is video-only and post-demux, so:
+ *   pipe_backlog = recv_max - rendered   (old, possibly bogus)
+ *   seg_recv     = recv_max - vparse_max (recv probe inflation / demux stage)
+ *   vpipe        = vparse_max - rendered (real pipeline depth)             */
+static GstPadProbeReturn log_vparse_buffer(GstPad *pad, GstPadProbeInfo *info,
+                                           gpointer user_data) {
+    (void)pad;
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (ctx != NULL && buf != NULL && GST_BUFFER_PTS_IS_VALID(buf)) {
+        gint64 pts = (gint64)(GST_BUFFER_PTS(buf) / GST_MSECOND);
+        if (pts > ctx->vparse_max_pts_ms) {
+            ctx->vparse_max_pts_ms = pts;
+        }
+    }
+    guint n = (guint)g_atomic_int_add((volatile gint *)&vparse_probe_count, 1);
+    if (n <= 3 || (n % 500) == 0) {
+        LOGI("vparse pad buffer #%u size=%" G_GSIZE_FORMAT, n,
+             gst_buffer_get_size(GST_PAD_PROBE_INFO_BUFFER(info)));
+    }
+    return GST_PAD_PROBE_OK;
+}
+
 static void tune_element_latency(GstElement *element, gpointer user_data) {
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
     if (ctx == NULL || !ctx->low_latency || element == NULL) return;
@@ -194,6 +257,33 @@ static void tune_element_latency(GstElement *element, gpointer user_data) {
             g_object_set(element, "interleave-max-bytes", 0u, NULL);
         }
         LOGI("low-latency tune multiqueue %s", GST_OBJECT_NAME(element));
+    } else if (g_strcmp0(fname, "flvdemux") == 0) {
+        static GQuark demux_probe_quark = 0;
+        if (demux_probe_quark == 0)
+            demux_probe_quark = g_quark_from_static_string("lp-demux-probe");
+        if (g_object_get_qdata(G_OBJECT(element), demux_probe_quark) == NULL) {
+            g_signal_connect(element, "pad-added",
+                             G_CALLBACK(on_flvdemux_pad_added), ctx);
+            g_object_set_qdata(G_OBJECT(element), demux_probe_quark,
+                               GUINT_TO_POINTER(1));
+            LOGI("demux pad-added hooked on %s", GST_OBJECT_NAME(element));
+        }
+    } else if (g_strcmp0(fname, "h264parse") == 0) {
+        /* attach video-side PTS probe once (deep + recursive walk may re-tune) */
+        static GQuark vparse_probe_quark = 0;
+        if (vparse_probe_quark == 0)
+            vparse_probe_quark = g_quark_from_static_string("lp-vparse-probe");
+        if (g_object_get_qdata(G_OBJECT(element), vparse_probe_quark) == NULL) {
+            GstPad *sp = gst_element_get_static_pad(element, "src");
+            if (sp != NULL) {
+                gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_BUFFER,
+                                  log_vparse_buffer, ctx, NULL);
+                g_object_set_qdata(G_OBJECT(element), vparse_probe_quark,
+                                   GUINT_TO_POINTER(1));
+                gst_object_unref(sp);
+                LOGI("vparse probe attached on %s", GST_OBJECT_NAME(element));
+            }
+        }
     }
 }
 
@@ -289,6 +379,129 @@ static void on_deep_element_added(GstBin *bin, GstBin *sub_bin, GstElement *elem
             gst_iterator_free(it);
         }
     }
+}
+
+/* multiqueue exposes current-level-* only on its PADS (GstMultiQueuePad, since
+ * 1.18); g_object_get() on the element silently fails and logs nothing, which
+ * hid the real backlog. The element-level "stats" boxed property carries the
+ * per-sub-queue fill (buffers/bytes/time) — use that instead. */
+static void log_multiqueue_level(GstElement *el) {
+    GstStructure *stats = NULL;
+    guint max_bufs = 0, max_bytes = 0;
+    guint64 max_time = 0;
+    g_object_get(el, "max-size-buffers", &max_bufs, "max-size-bytes", &max_bytes,
+                 "max-size-time", &max_time, "stats", &stats, NULL);
+    guint total_bufs = 0;
+    guint64 total_time = 0;
+    if (stats != NULL) {
+        const GValue *arr = gst_structure_get_value(stats, "queues");
+        if (arr != NULL && GST_VALUE_HOLDS_ARRAY(arr)) {
+            guint n = gst_value_array_get_size(arr);
+            for (guint i = 0; i < n; i++) {
+                const GValue *sv = gst_value_array_get_value(arr, i);
+                if (sv != NULL && GST_VALUE_HOLDS_STRUCTURE(sv)) {
+                    const GstStructure *s = gst_value_get_structure(sv);
+                    guint b = 0, by = 0;
+                    guint64 t = 0;
+                    gst_structure_get(s, "buffers", &b, "bytes", &by,
+                                      "time", &t, NULL);
+                    total_bufs += b;
+                    total_time += t;
+                    LOGI("QLEVEL mqs %s sub%u bufs=%u bytes=%u time=%" G_GUINT64_FORMAT
+                         "ms", GST_OBJECT_NAME(el), i, b, by, t / GST_MSECOND);
+                }
+            }
+        }
+        gst_structure_free(stats);
+    }
+    LOGI("QLEVEL multiqueue %s TOTAL bufs=%u time=%" G_GUINT64_FORMAT
+         "ms limits bufs=%u bytes=%u time=%" G_GUINT64_FORMAT "ms",
+         GST_OBJECT_NAME(el), total_bufs, total_time / GST_MSECOND,
+         max_bufs, max_bytes, max_time / GST_MSECOND);
+}
+
+static gboolean pipeline_elems_logged = FALSE;
+
+static void dump_element_inventory_cb(GstBin *bin) {
+    GstIterator *it = gst_bin_iterate_elements(bin);
+    GValue item = G_VALUE_INIT;
+    gboolean done = FALSE;
+    while (!done) {
+        switch (gst_iterator_next(it, &item)) {
+        case GST_ITERATOR_OK: {
+            GstElement *el = GST_ELEMENT(g_value_get_object(&item));
+            GstElementFactory *factory = gst_element_get_factory(el);
+            const gchar *fname = (factory != NULL)
+                ? gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory))
+                : "?";
+            LOGI("ELEM %s:%s", fname ? fname : "?", GST_OBJECT_NAME(el));
+            if (GST_IS_BIN(el)) dump_element_inventory_cb(GST_BIN(el));
+            g_value_reset(&item);
+            break;
+        }
+        case GST_ITERATOR_RESYNC:
+            gst_iterator_resync(it);
+            break;
+        default:
+            done = TRUE;
+            break;
+        }
+    }
+    g_value_unset(&item);
+    gst_iterator_free(it);
+}
+
+static void dump_queue_levels_cb(GstBin *bin, gpointer user_data) {
+    GstIterator *it = gst_bin_iterate_elements(bin);
+    GValue item = G_VALUE_INIT;
+    gboolean done = FALSE;
+    while (!done) {
+        switch (gst_iterator_next(it, &item)) {
+        case GST_ITERATOR_OK: {
+            GstElement *el = GST_ELEMENT(g_value_get_object(&item));
+            GstElementFactory *factory = gst_element_get_factory(el);
+            if (factory != NULL) {
+                const gchar *fname =
+                    gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+                if (g_strcmp0(fname, "multiqueue") == 0) {
+                    log_multiqueue_level(el);
+                } else if (fname != NULL && (g_strcmp0(fname, "queue") == 0 ||
+                                             g_strcmp0(fname, "queue2") == 0)) {
+                    GObjectClass *klass = G_OBJECT_GET_CLASS(el);
+                    if (g_object_class_find_property(klass, "current-level-time")) {
+                        guint64 lvl_time = 0;
+                        guint lvl_bufs = 0;
+                        g_object_get(el, "current-level-time", &lvl_time, NULL);
+                        if (g_object_class_find_property(klass, "current-level-buffers")) {
+                            g_object_get(el, "current-level-buffers", &lvl_bufs, NULL);
+                        }
+                        LOGI("QLEVEL %s %s time=%" G_GUINT64_FORMAT "ms bufs=%u",
+                             fname, GST_OBJECT_NAME(el),
+                             lvl_time / GST_MSECOND, lvl_bufs);
+                    } else {
+                        LOGI("QLEVEL %s %s (no current-level props)",
+                             fname, GST_OBJECT_NAME(el));
+                    }
+                }
+            }
+            if (GST_IS_BIN(el)) {
+                dump_queue_levels_cb(GST_BIN(el), user_data);
+            }
+            g_value_reset(&item);
+            break;
+        }
+        case GST_ITERATOR_RESYNC:
+            gst_iterator_resync(it);
+            break;
+        case GST_ITERATOR_ERROR:
+        case GST_ITERATOR_DONE:
+        default:
+            done = TRUE;
+            break;
+        }
+    }
+    g_value_unset(&item);
+    gst_iterator_free(it);
 }
 
 /* Draw one RGBx/RGBA frame into ANativeWindow with nearest-neighbor scale.
@@ -390,6 +603,9 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
         return GST_FLOW_ERROR;
     }
 
+    /* 标记视频仍在流动（丢弃/未绘制也算），供上层卡死看门狗判断 */
+    ctx->last_video_sample_wall_us = g_get_monotonic_time();
+
     GstBuffer *buffer = gst_sample_get_buffer(sample);
     GstCaps *caps = gst_sample_get_caps(sample);
     if (buffer == NULL || caps == NULL) {
@@ -408,6 +624,37 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
                 int stride = (int)GST_VIDEO_INFO_PLANE_STRIDE(&vinfo, 0);
                 if (stride < w * 4) stride = w * 4;
 
+                /* 追赶：CDN 开播突发会把多秒历史帧灌进 multiqueue，sync=FALSE
+                 * 让解码器以解码速度排空队列，这里把"远落后于直播边缘"的旧帧
+                 * 直接丢弃，跳帧贴到直播边缘（不渲染旧帧=无加速观感）。 */
+                gint64 cur_pts = GST_BUFFER_PTS_IS_VALID(buffer)
+                    ? (gint64)(GST_BUFFER_PTS(buffer) / GST_MSECOND) : -1;
+                gint64 edge = ctx->vdemux_max_pts_ms;
+                if (ctx->recv_max_pts_ms > edge) edge = ctx->recv_max_pts_ms;
+                if (cur_pts >= 0 && edge >= 0) {
+                    gint64 lag = edge - cur_pts;
+                    if (!ctx->catching_up && lag > 600) {
+                        ctx->catching_up = TRUE;
+                        LOGI("catchup: START drop (lag=%" G_GINT64_FORMAT "ms)",
+                             lag);
+                    } else if (ctx->catching_up && lag < 200) {
+                        ctx->catching_up = FALSE;
+                        LOGI("catchup: STOP (lag=%" G_GINT64_FORMAT "ms)", lag);
+                    }
+                    if (ctx->catching_up) {
+                        static gint64 last_drop_log_us = 0;
+                        gint64 now_us = g_get_monotonic_time();
+                        if (now_us - last_drop_log_us > 1000000) {
+                            last_drop_log_us = now_us;
+                            LOGI("catchup: dropping old frame lag=%" G_GINT64_FORMAT
+                                 "ms", lag);
+                        }
+                        gst_buffer_unmap(buffer, &map);
+                        gst_sample_unref(sample);
+                        return GST_FLOW_OK;
+                    }
+                }
+
                 gboolean posted = draw_frame_to_window(ctx, map.data, w, h, stride);
                 gst_buffer_unmap(buffer, &map);
 
@@ -418,8 +665,53 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
                 }
                 if (!ctx->first_frame_sent) {
                     ctx->first_frame_sent = TRUE;
-                    LOGI("First frame post=%d (%dx%d)", posted, w, h);
+                    if (GST_BUFFER_PTS_IS_VALID(buffer)) {
+                        ctx->lag_ref_pts_ms = (gint64)(GST_BUFFER_PTS(buffer) / GST_MSECOND);
+                    } else {
+                        ctx->lag_ref_pts_ms = -2;
+                    }
+                    ctx->lag_ref_wall_us = g_get_monotonic_time();
+                    ctx->lag_last_log_us = ctx->lag_ref_wall_us;
+                    LOGI("First frame post=%d (%dx%d) pts=%" G_GINT64_FORMAT "ms",
+                         posted, w, h, ctx->lag_ref_pts_ms);
                     latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
+                } else if (ctx->lag_ref_pts_ms >= 0) {
+                    gint64 now_us = g_get_monotonic_time();
+                    if (now_us - ctx->lag_last_log_us > 2000000) {
+                        ctx->lag_last_log_us = now_us;
+                        if (GST_BUFFER_PTS_IS_VALID(buffer)) {
+                            gint64 pts = (gint64)(GST_BUFFER_PTS(buffer) / GST_MSECOND);
+                            gint64 wall_ms = (now_us - ctx->lag_ref_wall_us) / 1000;
+                            gint64 pts_age = pts - ctx->lag_ref_pts_ms;
+                            gint64 piped = (ctx->recv_max_pts_ms >= 0)
+                                ? (ctx->recv_max_pts_ms - pts) : -1;
+                            gint64 vpipe = (ctx->vparse_max_pts_ms >= 0)
+                                ? (ctx->vparse_max_pts_ms - pts) : -1;
+                            gint64 vdm = (ctx->vdemux_max_pts_ms >= 0)
+                                ? (ctx->vdemux_max_pts_ms - pts) : -1;
+                            gint64 avskew = (ctx->ademux_max_pts_ms >= 0 &&
+                                             ctx->vdemux_max_pts_ms >= 0)
+                                ? (ctx->ademux_max_pts_ms -
+                                   ctx->vdemux_max_pts_ms) : -1;
+                            gint64 seg_recv = (ctx->recv_max_pts_ms >= 0 &&
+                                               ctx->vparse_max_pts_ms >= 0)
+                                ? (ctx->recv_max_pts_ms - ctx->vparse_max_pts_ms)
+                                : -1;
+                            LOGI("LAG wall=%" G_GINT64_FORMAT "ms pts_age=%" G_GINT64_FORMAT
+                                 "ms behind=%" G_GINT64_FORMAT "ms pipe_backlog=%" G_GINT64_FORMAT
+                                 "ms vpipe=%" G_GINT64_FORMAT "ms vdm=%" G_GINT64_FORMAT
+                                 "ms avskew=%" G_GINT64_FORMAT "ms seg_recv=%" G_GINT64_FORMAT "ms",
+                                 wall_ms, pts_age, wall_ms - pts_age, piped, vpipe,
+                                 vdm, avskew, seg_recv);
+                            if (GST_IS_BIN(ctx->pipeline)) {
+                                if (!pipeline_elems_logged) {
+                                    pipeline_elems_logged = TRUE;
+                                    dump_element_inventory_cb(GST_BIN(ctx->pipeline));
+                                }
+                                dump_queue_levels_cb(GST_BIN(ctx->pipeline), NULL);
+                            }
+                        }
+                    }
                 }
             } else {
                 LOGI("appsink new-sample: gst_buffer_map READ failed");
@@ -605,6 +897,18 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx == NULL || uri == NULL) return -1;
 
     LOGI("Playing URI: %s", uri);
+    gint64 t_play_start = g_get_monotonic_time ();
+    ctx->lag_ref_pts_ms = -1;
+    ctx->lag_ref_wall_us = 0;
+    ctx->lag_last_log_us = 0;
+    ctx->recv_max_pts_ms = -1;
+    ctx->vparse_max_pts_ms = -1;
+    ctx->vdemux_max_pts_ms = -1;
+    ctx->ademux_max_pts_ms = -1;
+    ctx->catching_up = FALSE;
+    ctx->last_video_sample_wall_us = -1;
+    pipeline_elems_logged = FALSE;
+    vparse_probe_count = 0;
 
     ensure_main_loop();
 
@@ -721,7 +1025,7 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         gst_caps_unref(caps);
         g_signal_connect(ctx->video_sink, "new-sample",
                          G_CALLBACK(on_appsink_new_sample), ctx);
-        LOGI("appsink configured (RGBx/RGBA, emit-signals, sync=FALSE, max-buffers=2)");
+        LOGI("appsink configured (RGBx/RGBA, emit-signals, sync=FALSE, max-buffers=2, catchup-drop)");
     }
     if (ctx->video_sink != NULL) {
         LOGI("Setting playbin video-sink...");
@@ -840,6 +1144,10 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx->low_latency) {
         tune_pipeline_queues(GST_BIN(ctx->pipeline));
     }
+
+    gint64 t_play_end = g_get_monotonic_time ();
+    LOGI("TIMING: pipeline setup took %" G_GINT64_FORMAT " us",
+         (t_play_end - t_play_start));
 
     // 发送连接成功消息
     latency_player_send_message(ctx, GST_MSG_CONNECTED, 0, 0);
@@ -1004,6 +1312,13 @@ int latency_player_set_surface(LatencyPlayerContext *ctx, ANativeWindow *window)
 
     g_mutex_unlock(&ctx->mutex);
     return 0;
+}
+
+gint64 latency_player_last_frame_age_ms(LatencyPlayerContext *ctx) {
+    if (ctx == NULL) return -1;
+    gint64 last = ctx->last_video_sample_wall_us;
+    if (last <= 0) return -1;
+    return (g_get_monotonic_time() - last) / 1000;
 }
 
 int latency_player_set_mute(LatencyPlayerContext *ctx, gboolean mute) {
@@ -1798,7 +2113,32 @@ static guint src_probe_count = 0;
 
 static GstPadProbeReturn log_src_buffer(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
     (void)pad;
-    (void)user_data;
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (ctx != NULL && buf != NULL && GST_BUFFER_PTS_IS_VALID(buf)) {
+        gint64 pts = (gint64)(GST_BUFFER_PTS(buf) / GST_MSECOND);
+        if (pts > ctx->recv_max_pts_ms) {
+            if (ctx->recv_max_pts_ms >= 0 &&
+                (pts - ctx->recv_max_pts_ms) > 250) {
+                /* one inflated jump poisons the max forever — surface it */
+                LOGI("PTSJUMP recv_max +%lldms (%lld -> %lld)",
+                     (long long)(pts - ctx->recv_max_pts_ms),
+                     (long long)ctx->recv_max_pts_ms, (long long)pts);
+            }
+            ctx->recv_max_pts_ms = pts;
+        } else if (ctx->recv_max_pts_ms >= 0 &&
+                   (ctx->recv_max_pts_ms - pts) > 60000) {
+            /* PTS went backwards >60s: timeline reset/epoch switch */
+            static gint64 last_back_log_us = 0;
+            gint64 now_us = g_get_monotonic_time();
+            if (now_us - last_back_log_us > 2000000) {
+                last_back_log_us = now_us;
+                LOGI("PTSBACK recv pts %lld behind max %lld (delta %lldms)",
+                     (long long)pts, (long long)ctx->recv_max_pts_ms,
+                     (long long)(ctx->recv_max_pts_ms - pts));
+            }
+        }
+    }
     guint n = (guint)g_atomic_int_add((volatile gint *)&src_probe_count, 1);
     if (n <= 3 || (n % 500) == 0) {
         LOGI("src pad buffer #%u size=%" G_GSIZE_FORMAT, n,
@@ -1879,7 +2219,7 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
         GstPad *srcpad = gst_element_get_static_pad(source, "src");
         if (srcpad != NULL) {
             gst_pad_add_probe(srcpad, GST_PAD_PROBE_TYPE_BUFFER,
-                              log_src_buffer, NULL, NULL);
+                              log_src_buffer, ctx, NULL);
             gst_object_unref(srcpad);
             LOGI("src pad buffer probe attached");
         }

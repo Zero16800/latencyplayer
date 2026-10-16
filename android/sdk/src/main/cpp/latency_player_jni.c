@@ -463,6 +463,18 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetSurface(
 }
 
 /**
+ * 最近一次收到视频帧的年龄(ms)，-1=从未收到（后台/卡死看门狗用）
+ */
+JNIEXPORT jlong JNICALL
+Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeLastFrameAgeMs(
+    JNIEnv *env, jobject thiz, jlong handle) {
+    (void)env;
+    (void)thiz;
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;
+    return (jlong)latency_player_last_frame_age_ms(ctx);
+}
+
+/**
  * 开始播放
  */
 JNIEXPORT void JNICALL

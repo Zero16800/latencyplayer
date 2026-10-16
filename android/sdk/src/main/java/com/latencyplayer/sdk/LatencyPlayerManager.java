@@ -330,6 +330,15 @@ public class LatencyPlayerManager {
     }
 
     /**
+     * 最近一次收到视频帧的年龄（毫秒），-1 表示本次播放尚未收到任何帧。
+     * <p>供上层在退到后台/被系统冻结后判断视频是否已停止流动，用于触发重连自恢复。
+     */
+    public long getLastFrameAgeMs() {
+        if (!isInitialized || nativeHandle == 0) return -1;
+        return nativeLastFrameAgeMs(nativeHandle);
+    }
+
+    /**
      * 释放播放器资源
      */
     public void release() {
@@ -509,6 +518,8 @@ public class LatencyPlayerManager {
     private native long nativeCreate();
 
     private native void nativeSetSurface(long handle, Surface surface);
+
+    private native long nativeLastFrameAgeMs(long handle);
 
     private native void nativePlay(long handle, String uri);
 

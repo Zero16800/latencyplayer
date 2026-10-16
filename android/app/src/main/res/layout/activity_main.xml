@@ -98,7 +98,8 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:background="#000000">
 
         <com.latencyplayer.sdk.LatencyPlayerView
             android:id="@+id/player_view"

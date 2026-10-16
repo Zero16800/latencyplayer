@@ -45,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     // 冻结帧衔接：切换前抓最后一帧盖住画面，首帧到达后淡出，全程无黑屏
     private volatile boolean hasFirstFrame;
     private boolean startPending;
+    private volatile long playTapT0;
     private final ExecutorService freezeExecutor = Executors.newSingleThreadExecutor();
 
     private interface FreezeCallback {
@@ -145,7 +146,8 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onFirstFrameRendered() {
-                Log.d(TAG, "First frame rendered");
+                long elapsed = playTapT0 > 0 ? (android.os.SystemClock.elapsedRealtime() - playTapT0) : -1;
+                Log.i(TAG, "TIMING first-frame t=" + elapsed + "ms after tap");
                 hasFirstFrame = true;
                 updateStatus("播放中");
                 dismissFreeze();
@@ -189,6 +191,9 @@ public class MainActivity extends AppCompatActivity {
         }
         if (startPending) return;
 
+        final long t0 = android.os.SystemClock.elapsedRealtime();
+        playTapT0 = t0;
+        Log.i(TAG, "TIMING tap->startPlayback t=" + t0);
         playerManager.getConfig().setUrl(url);
 
         if (playerManager.isPlaying() && hasFirstFrame) {
@@ -201,11 +206,13 @@ public class MainActivity extends AppCompatActivity {
                 hasFirstFrame = false;
                 startPending = false;
                 playerManager.start();
+                Log.i(TAG, "TIMING switch start t=" + (android.os.SystemClock.elapsedRealtime() - t0) + "ms after tap");
                 updateStatus("正在播放...");
             });
         } else {
             hasFirstFrame = false;
             playerManager.start();
+            Log.i(TAG, "TIMING start() returned t=" + (android.os.SystemClock.elapsedRealtime() - t0) + "ms after tap");
             updateStatus("正在播放...");
         }
     }

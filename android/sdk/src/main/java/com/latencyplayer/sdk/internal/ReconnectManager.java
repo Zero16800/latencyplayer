@@ -41,6 +41,41 @@ public class ReconnectManager {
         }
     };
 
+    /** 视频停止流动判定阈值：连续这么久没有新视频帧即认为管线卡死 */
+    private static final long STALL_THRESHOLD_MS = 3000;
+
+    /** 卡死检查周期 */
+    private static final long STALL_CHECK_INTERVAL_MS = 1000;
+
+    /**
+     * 卡死看门狗
+     * <p>
+     * 退到后台/被系统冻结返回后，管线可能仍在收字节但视频帧不再流动
+     * （画面黑屏）。这里周期性检查最近一帧的年龄，超阈值即立即重连自恢复。
+     */
+    private final Runnable stallCheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isMonitoring) {
+                return;
+            }
+            try {
+                if (!isReconnecting && player.isPlaying()) {
+                    long age = player.getLastFrameAgeMs();
+                    if (age > STALL_THRESHOLD_MS) {
+                        Log.w(TAG, "Video stalled: no frame for " + age
+                                + "ms, forcing reconnect");
+                        isReconnecting = true;
+                        attemptReconnect();
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "Stall check failed", t);
+            }
+            handler.postDelayed(this, STALL_CHECK_INTERVAL_MS);
+        }
+    };
+
     public ReconnectManager(LatencyPlayerManager player) {
         this.player = player;
     }
@@ -51,6 +86,8 @@ public class ReconnectManager {
     public void startMonitor() {
         isMonitoring = true;
         reconnectCount = 0;
+        handler.removeCallbacks(stallCheckRunnable);
+        handler.postDelayed(stallCheckRunnable, STALL_CHECK_INTERVAL_MS);
         Log.d(TAG, "Reconnect monitor started");
     }
 
@@ -61,6 +98,7 @@ public class ReconnectManager {
         isMonitoring = false;
         isReconnecting = false;
         handler.removeCallbacks(reconnectRunnable);
+        handler.removeCallbacks(stallCheckRunnable);
         Log.d(TAG, "Reconnect monitor stopped");
     }
 
