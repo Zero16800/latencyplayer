@@ -48,7 +48,7 @@ GSTREAMER_ROOT_ANDROID=E\:\\Android-SDK\\NDK-CMake-GStreamer
 **方式 A：Maven（推荐，见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)）**
 
 ```kotlin
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.7")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")
 ```
 
 **方式 B：本地 AAR**
@@ -232,13 +232,13 @@ Native 链接策略（`android/sdk/src/main/cpp/CMakeLists.txt`）：
 - Bionic 缺失符号补桩（`gstreamer_stubs.c`）：`in6addr_any/loopback`、`getgrgid_r`、`fseeko64/ftello64`(32 位)、`__gnu_strerror_r`、84 个 `vk*`
 - FFmpeg 静态库（`libgstlibav` 连带）部分目标文件非 PIC，靠 `ff_localize.map` 版本脚本（`local: ff_*;`）把符号本地化后才能进 `.so`（否则 arm64 报 `R_AARCH64_ADR_PREL_PG_HI21 ... recompile with -fPIC`、x86_64 报 `R_X86_64_PC32`）
 
-结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ 58.2 MB（1.0.2）→ 59.6 MB（1.0.3，**1.0.4 持平**），arm64 so 46.9→17.6→20.3→32.3→33.1 MB（1.0.3，**1.0.4 持平**，strip 后）。
+结果：AAR 82→29.4 MB（1.0.0）→ 34.1 MB（1.0.1）→ 58.2 MB（1.0.2）→ 59.6 MB（1.0.3，**1.0.4–1.0.13 持平**），arm64 so 46.9→17.6→20.3→32.3→33.1 MB（1.0.3，**1.0.4–1.0.13 持平**，strip 后；期间均为 native 修复与 API 增补，未引入新链接库）。
 
 > `in6addr_*` 桩不能 include `<netinet/in.h>`（头文件里声明为 static），需自定义结构体。
 
 ### 7.4 发布链路（Maven，当前主链路）
 
-SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`android/app/build.gradle.kts` → `    implementation("com.latencyplayer:latencyplayer-sdk:1.0.4")`）。
+SDK 以 Maven 坐标 `com.latencyplayer:latencyplayer-sdk:<version>` 发布，Demo 已改为坐标依赖（`android/app/build.gradle.kts` → `    implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")`）。
 
 ```bat
 set JAVA_HOME=E:\Android-SDK\jdk-17
@@ -254,7 +254,7 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon
 gradlew.bat :app:clean :app:assembleDebug --no-daemon
 ```
 
-版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.7）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
+版本号在 `gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 1.0.13）。接入方完整配置见 [MAVEN_INTEGRATION.md](MAVEN_INTEGRATION.md)。
 
 > 旧的 `implementation(files("libs/sdk-release.aar"))` 离线方式仍可用：手动拷 `android\sdk\build\outputs\aar\sdk-release.aar` 到 `android\app\libs\`，AAR 变了必须 `:app:clean` 否则命中 UP-TO-DATE 打进旧包。
 
@@ -297,7 +297,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 | 协议 | 支持 | 说明 |
 |------|------|------|
-| RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src`。1.0.2 起 mediamtx 直播回归通过（H.264 + AAC，opensles 出声）；**1.0.3 修复** decodebin 过早 expose 造成的间歇性无视频（12/12 稳定）；**1.0.7 修复** 停播/切换瞬间 SIGSEGV（rtmpsrc unlock 竞态，见已知问题 9） |
+| RTMP / RTMPS | ✅ | 主路径；优先 `rtmpsrc`（librtmp），必要时 `rtmp2src`。1.0.2 起 mediamtx 直播回归通过（H.264 + AAC，opensles 出声）；**1.0.3 修复** decodebin 过早 expose 造成的间歇性无视频（12/12 稳定）；**1.0.7 修复** 停播/切换瞬间 SIGSEGV（rtmpsrc unlock 竞态，见已知问题 9）；**1.0.13 修复** CDN 开播突发导致的 ~2.5s 起播积压（appsink `sync=FALSE` + 追帧丢弃，见已知问题 10） |
 | RTSP / RTSPS | ✅ | 1.0.1 注册 `rtspsrc` + `rtp`/`rtpmanager` + `gstrtsp`/`gstsdp`；`latency=80ms`（lowLatency）/ `200ms`。1.0.3 回归通过（First frame + PLAYING） |
 | HTTP-FLV | ✅ | 1.0.1 注册 `libsoup-3.0`（`souphttpsrc`，`timeout=10s`）。1.0.3 回归通过（完整播完，首次读挂起未复现） |
 | HLS | ✅ | 1.0.1 注册 `hls` / `mpegtsdemux` / `isomp4` / `aes` + `uridownloader`/`adaptivedemux`。1.0.3 点播 + **直播（mediamtx fMP4 双 variant）回归通过**（**1.0.3 修复**，见已知问题 5） |
@@ -321,7 +321,7 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 
 ## 10. 渲染路径（摘要）
 
-1. `playbin`，`video-sink` 走 **appsink**（`RGBx/RGBA`，`sync=FALSE`，小缓冲）  
+1. `playbin`，`video-sink` 走 **appsink**（`RGBx/RGBA`，`sync=FALSE`，小缓冲）。`sync=FALSE` + 回调「落后直播边缘 >600ms 的旧帧直接丢弃」（1.0.13 追帧）保证贴到直播边缘、不被 CDN 突发积压拖住  
 2. 回调取 sample → `ANativeWindow` 直绘  
 3. Surface 尺寸变化时按需 `setBuffersGeometry`（防重复调用）  
 4. `glimagesink`/EGL 在部分模拟器上不可靠，仅作回退  
@@ -337,8 +337,10 @@ Nexus `maven-releases` 是 `ALLOW_ONCE`，同版本禁止覆盖：升 `gradle.pr
 7. ~~**播放中 `stop()` 与 buffering 消息竞态 SIGSEGV（1.0.2 新发现）**~~ —— **1.0.3 已修复，压测 0 崩溃 0 死锁**：bus 线程 `on_buffering`（live 分支 `set_state(PLAYING)`）与 `latency_player_stop()` 的 `set_state(NULL)` 并发，playbin `activate_group` 访问已释放对象（`SIGSEGV fault addr 0xaaaaaaaa`）。修复：全部 bus 信号 handler（error/eos/state-changed/buffering/async-done）与 pause/resume/setter/查询/截图取帧统一持 `ctx->mutex`，与 play/stop/set_surface 同一把锁序列化。压测：HLS 直播 6 + RTMP 8 次带 buffering 的停止，全协议回归通过。
 8. ~~**重复播放触发 ANR「没有响应」（1.0.3 发布后发现）**~~ —— **已修复（2026-10-04，随 1.0.4 发布），压测 70 次播放 0 死亡 0 ANR**：主线程 `latency_player_play()` 持 `ctx->mutex` 拆解旧管线（`set_state(NULL)` 等 appsink 流线程退出渲染）与流线程 `on_appsink_new_sample → draw_frame_to_window` 等同一把 `ctx->mutex` 形成环形等待 → 主线程冻结、系统弹 ANR（复现于重复点播放第 4 次左右；`latency_player_play+252 = core.c:614` 卡在 `gst_base_sink_change_state → g_mutex_lock_slowpath`）。修复：新增 `window_mutex` 专护 `native_window`/`window_geo_*`，`draw_frame_to_window` 与 `prepare-window-handle` 只持此锁，`set_surface`/`release` 在 `ctx->mutex` 内嵌套持锁（锁序单向 `ctx->mutex → window_mutex`，不持 `window_mutex` 跨 `set_state`），流线程不再触碰 `ctx->mutex`。回归：RTMP 渲染冒烟、RTSP/HLS/HTTP-FLV 全通过（HLS 1920x1080 出画截图确认）。
 9. ~~**停止/切换 RTMP 流瞬间 SIGSEGV（`fault addr 0x38`，栈在 `RTMP_ReadPacket`；2026-10-08 实机复现）**~~ —— **已修复（随 1.0.7 发布），真机压测 0 崩溃**：上游 gstrtmpsrc 的 `unlock()` 直接调 `RTMP_Close()`，librtmp `CloseInternal()` 即 `free()` 并置空 `r->m_vec`，而流线程仍在 `RTMP_ReadPacket` 解引用 `m_vec[channel]`（channel=7 → 0x38）；窗口 = 正在收包时停播/切台。修复（vendored `vendor/rtmp/gstrtmpsrc.c`）：`unlock()` 只 `shutdown(socket)`，`RTMP_Close+RTMP_Free` 延后到 `stop()`（流线程 join 后，零泄漏）；`start()` 失败路径补 Close；JNI 忽略 SIGPIPE（stop 对已 shutdown socket 写 DeleteStream 得 EPIPE 不杀进程）。取舍：flush-seek 后不自动重连（SDK RTMP 强制 `live=1` 不 seek）。压测：快速停止→播放 120 轮 + 切台回归 0 崩溃。
+10. ~~**起播恒定落后直播边缘 ~2.5s（1.0.12 定位，1.0.13 修复）**~~ —— 根因：CDN（阿里云）建连瞬间突发下发约 2.5s 历史视频（初速约 10× 实时码率），旧实现整段缓冲后按 1× 排出、永不排空（`multiqueue` 自报队列 0 不可信，积压实际卡在 `flvdemux→h264parse` 之间，`vdm` 探针 2520ms、`vpipe` 仅 160ms 可证）。修复：appsink `sync=FALSE` + 回调按「直播边缘 − 帧 PTS」追帧丢弃（>600ms 进、<200ms 出，只跳帧不渲染旧帧）。实测 `pipe_backlog` 2550ms → 40–200ms，追平 ~0.2–0.3s，首帧 ≈0.9s。
+11. ~~**退到后台 / 被系统冻结返回后黑屏（1.0.13 修复）**~~ —— 场景：退后台 SurfaceView surface 被销毁停止绘制，返回时重建重绑；短时间可秒恢复，但后台较久（MIUI 冻结后台进程）后 RTMP 源仍在收字节、视频帧却不再流动，返回后一直黑屏。修复：native 记录「最近视频帧年龄」（新 API `getLastFrameAgeMs()`，`last_video_sample_wall_us` 每 sample 更新），`ReconnectManager` 播放中每秒检查、>3s 无新帧即强制重连（日志 `Video stalled: no frame for Xms, forcing reconnect`）。实测后台 22s 返回后 **~750ms 出画**。注意：按返回键真退出会 `release()` 销毁播放器，重开需业务侧重启 `start()`。
 
-已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG 按后缀）；播放中 stop×buffering 竞态 SIGSEGV；重复播放 ANR 死锁（draw 与主线程 teardown 互等 `ctx->mutex`）；RTMP 停播/切换 `m_vec` NULL SIGSEGV（1.0.7 rtmpsrc unlock 补丁）。
+已修复：稳态延迟误判（实测 ~125ms）；连点「播放」double-free（`gst_object_ref_sink`）；so 符号/链接完整性（`--no-undefined` + Bionic 桩）；AAC 解码缺失（1.0.2 注册 `libgstlibav`）；播放无音频输出（1.0.2 注册 `libgstopensles`，链接系统 `OpenSLES`）；`avdec_h264` 抢占 openh264 导致的解码错误（1.0.2 调 rank）；HLS 直播 raw 字节泄漏；RTMP 间歇性无视频；截图文件写入（PNG/JPEG 按后缀）；播放中 stop×buffering 竞态 SIGSEGV；重复播放 ANR 死锁（draw 与主线程 teardown 互等 `ctx->mutex`）；RTMP 停播/切换 `m_vec` NULL SIGSEGV（1.0.7 rtmpsrc unlock 补丁）；起播 CDN 突发积压（1.0.13 appsink `sync=FALSE` + 追帧丢弃）；退后台返回黑屏（1.0.13 卡死看门狗，`getLastFrameAgeMs`）。
 
 ## 12. 许可证
 

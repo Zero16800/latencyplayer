@@ -39,6 +39,7 @@ LatencyPlayer SDK 是基于 **GStreamer 1.28.7** 的 Android 直播播放器 SDK
 | `setRotation(int)` | 旋转 0 / 90 / 180 / 270 |
 | `isPlaying()` | 状态是否为 `PLAYING` |
 | `getState()` | 当前 `LatencyPlayerState` |
+| `getLastFrameAgeMs()` | 最近一次收到视频帧的年龄 (ms)；`-1` = 本次播放尚未收到任何帧。供上层判断退后台 / 被系统冻结后视频是否停止流动（SDK 内 `ReconnectManager` 用它做 >3s 卡死看门狗），1.0.13 新增 |
 | `release()` | 释放 Native 资源；可重复调用，之后不可再使用实例 |
 
 #### 使用示例

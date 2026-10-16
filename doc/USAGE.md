@@ -17,7 +17,7 @@ App 模块 `build.gradle.kts`：
 
 ```kotlin
 dependencies {
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.7")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")
 }
 ```
 
@@ -216,6 +216,7 @@ player.start();
 说明：
 
 - `lowLatency=true` 时 Native 会尝试压扁 `queue2` / `multiqueue` / 内部队列，并缩短 playbin buffer duration。
+- 1.0.13 起 appsink 使用 `sync=FALSE` 并对**落后直播边缘的旧帧直接丢帧追平**（不渲染旧帧、无「快进」观感），因此起播/恢复后会**跳过 CDN 突发下发的历史帧**、直接贴到直播边缘；这是预期行为。
 - 直播（`rtmp://` / `rtsp://`）下 buffering **不会** 像点播那样卡住进度条逻辑。
 - 端到端延迟还受 CDN / 推流端编码 GOP / 传输影响；SDK 侧主要压客户端缓冲与队列。
 
@@ -264,14 +265,18 @@ player.setCallback(new LatencyPlayerCallback() {
 | 切换/停止 RTMP 流瞬间崩溃（`fault addr 0x38`，栈在 `RTMP_ReadPacket`） | **已修复（随 1.0.7 发布）**：上游 rtmpsrc 的 `unlock()` 在打断阻塞读时 `RTMP_Close` 释放了读线程仍在用的 `m_vec`；1.0.7 vendored 补丁改为 unlock 只 `shutdown` socket、Close 延后到 `stop()`。真机压测 120 轮 0 崩溃，见 README 已知问题 8 |
 | HTTP-FLV / HLS 起播后无画面 | HTTP-FLV：**1.0.3 回归通过**（souphttpsrc 首读挂起未复现）；HLS 点播 + **直播均回归通过**（**1.0.3 修复**，见 README 已知问题 4） |
 | RTMP 只有声音无画面 | **1.0.3 已修复**（decodebin overrun 宽限补丁，本地回归 12/12），见 README 已知问题 5 |
+| 起播后一直比源流慢约 2.5s（CDN 突发灌入） | **1.0.13 已修复**：CDN 建连突发下发历史帧导致整段积压；appsink `sync=FALSE` + 追帧丢弃后 `pipe_backlog` 降到 40–200ms，见 README「延迟 → 起播积压」 |
+| 退到后台/被冻结返回后黑屏 | **1.0.13 已修复**：视频停止流动 >3s 自动重连（`getLastFrameAgeMs` 卡死看门狗），实测后台 22s 返回 ~750ms 出画，见 README 已知问题 10 |
 
 ---
 
 ## 产物体积（2026-10）
 
-- AAR（4 ABI）：**59.6 MB**（1.0.4，与 1.0.3 持平；1.0.2 为 58.2 MB，1.0.1 为 34.1 MB，裁剪前 82 MB）
-- arm64 `liblatencyplayer.so`：**33.1 MB**（1.0.4，与 1.0.3 持平；1.0.2 为 32.3 MB，1.0.1 为 20.3 MB，裁剪前 46.9 MB）
-- Demo APK：**68.7 MB**（全 ABI，1.0.4）
+- AAR（4 ABI）：**59.6 MB**（1.0.4 起持平至今 1.0.13；1.0.2 为 58.2 MB，1.0.1 为 34.1 MB，裁剪前 82 MB）
+- arm64 `liblatencyplayer.so`：**33.1 MB**（1.0.4 起持平至今 1.0.13；1.0.2 为 32.3 MB，1.0.1 为 20.3 MB，裁剪前 46.9 MB）
+- Demo APK：**68.7 MB**（全 ABI，1.0.4 起持平至今 1.0.13）
+
+> 1.0.5–1.0.13 仅 native 代码修复与 API 增补，未引入新链接库，体积与 1.0.4 持平。
 
 > 1.0.2 体积增长来自 AAC 解码（`libgstlibav` + FFmpeg 静态库）与音频输出（`libgstopensles`）。
 

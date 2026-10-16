@@ -1,6 +1,6 @@
 ﻿# LatencyPlayer SDK — Maven 接入与完整使用指南
 
-> 坐标：`com.latencyplayer:latencyplayer-sdk:1.0.7`
+> 坐标：`com.latencyplayer:latencyplayer-sdk:1.0.13`
 > 支持：Maven 本地仓库 / Maven 远程仓库（私有 Nexus、GitHub Packages、阿里云效等）
 
 ---
@@ -18,10 +18,10 @@ gradlew.bat :sdk:publishReleasePublicationToProjectLocalRepository --no-daemon
 产出：
 
 ```
-E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.7\
-    latencyplayer-sdk-1.0.7.aar            (含 4 ABI so)
-    latencyplayer-sdk-1.0.7-sources.jar
-    latencyplayer-sdk-1.0.7.pom            (传递依赖: androidx.annotation / appcompat)
+E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.13\
+    latencyplayer-sdk-1.0.13.aar            (含 4 ABI so)
+    latencyplayer-sdk-1.0.13-sources.jar
+    latencyplayer-sdk-1.0.13.pom            (传递依赖: androidx.annotation / appcompat)
 ```
 
 ### 1.2 发布到 Nexus Repository 3
@@ -61,7 +61,7 @@ E:\Android-SDK\maven-repo\com\latencyplayer\latencyplayer-sdk\1.0.7\
 latencyplayer.maven.url=http://<nexus-host>:8081/repository/latencyplayer-releases/
 latencyplayer.maven.user=latencyplayer-deploy
 latencyplayer.maven.password=******
-LATENCYPLAYER_VERSION=1.0.7
+LATENCYPLAYER_VERSION=1.0.13
 ```
 
 > 不想明文放仓库里，可改用环境变量：代码里 `findProperty` 会读 `-P` 参数，也可
@@ -85,20 +85,20 @@ gradlew.bat :sdk:publishReleasePublicationToRemoteRepository --no-daemon ^
 > **大文件直传**：Gradle 传 29MB AAR 偶发超时，可改用 curl 直传（同样 201）：
 > ```bat
 > curl -u admin:****** -X PUT --upload-file sdk-release.aar ^
->   http://192.168.3.160:8970/repository/maven-releases/com/latencyplayer/latencyplayer-sdk/1.0.7/latencyplayer-sdk-1.0.7.aar
+>   http://192.168.3.160:8970/repository/maven-releases/com/latencyplayer/latencyplayer-sdk/1.0.13/latencyplayer-sdk-1.0.13.aar
 > ```
 >
 > **版本覆盖**：`maven-releases` 是 `ALLOW_ONCE`，同版本再发返回 400
 > `Repository does not allow updating assets` —— 升 `LATENCYPLAYER_VERSION` 再发。
 
-上传内容：`latencyplayer-sdk-1.0.7.aar` / `.pom` / `.module` / `-sources.jar` + 各式校验文件。
+上传内容：`latencyplayer-sdk-1.0.13.aar` / `.pom` / `.module` / `-sources.jar` + 各式校验文件。
 
 #### 第五步：验证
 
 浏览器打开（或匿名可读时）：
 
 ```
-http://<nexus-host>:8081/repository/latencyplayer-releases/com/latencyplayer/latencyplayer-sdk/1.0.7/
+http://<nexus-host>:8081/repository/latencyplayer-releases/com/latencyplayer/latencyplayer-sdk/1.0.13/
 ```
 
 能看到 `.aar`/`.pom` 即成功。Nexus 里 **Components** 列表也能看到该组件。
@@ -198,7 +198,7 @@ android {
 
 dependencies {
     // ====== LatencyPlayer SDK（Maven 远程/本地依赖）======
-    implementation("com.latencyplayer:latencyplayer-sdk:1.0.7")
+    implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")
 
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
@@ -559,6 +559,7 @@ p.release();                                      // 释放（onDestroy 必调�
 | 软/硬解切换 | ✅ | openh264 软解 + MediaCodec 路径 |
 | 低延迟模式 | ✅ | bufferTime=0 + lowLatency 压队列 |
 | 断线自动重连 | ✅ | 间隔/次数可配，0=无限 |
+| 后台返回自恢复 | ✅ | 1.0.13：退后台/被冻结返回后视频停止流动 >3s 自动重连（`getLastFrameAgeMs` 卡死看门狗） |
 | 暂停/恢复/停止 | ✅ | |
 | 热切换 URL | ✅ | switchUrl |
 | 静音/音量 | ✅ | 0–100 |
@@ -597,9 +598,9 @@ p.release();                                      // 释放（onDestroy 必调�
 
 | 产物 | 大小 |
 |------|------|
-| AAR（4 ABI） | 1.0.0: 29.4 MB / 1.0.1: 34.1 MB / 1.0.2: 58.2 MB / 1.0.3: 59.6 MB / 1.0.4: 59.6 MB |
-| arm64 so（strip 后） | 1.0.0: 17.6 MB / 1.0.1: 20.3 MB / 1.0.2: 32.3 MB / 1.0.3: 33.1 MB / 1.0.4: 33.1 MB |
-| 接入方 APK 增量 | 按所选 ABI 拆分，单 arm64 约 +33.1 MB（1.0.4；1.0.2 为 +32.3 MB） |
+| AAR（4 ABI） | 1.0.0: 29.4 MB / 1.0.1: 34.1 MB / 1.0.2: 58.2 MB / 1.0.3: 59.6 MB / 1.0.4–1.0.13: 59.6 MB |
+| arm64 so（strip 后） | 1.0.0: 17.6 MB / 1.0.1: 20.3 MB / 1.0.2: 32.3 MB / 1.0.3: 33.1 MB / 1.0.4–1.0.13: 33.1 MB |
+| 接入方 APK 增量 | 按所选 ABI 拆分，单 arm64 约 +33.1 MB（1.0.4 起持平至今 1.0.13；1.0.2 为 +32.3 MB） |
 
 ---
 
@@ -607,13 +608,15 @@ p.release();                                      // 释放（onDestroy 必调�
 
 | 现象 | 处理 |
 |------|------|
-| `Could not find com.latencyplayer:latencyplayer-sdk:1.0.7` | 确认消费方 `settings.gradle.kts` 加了仓库；本地仓库先执行 `:sdk:publish...ProjectLocalRepository` |
+| `Could not find com.latencyplayer:latencyplayer-sdk:1.0.13` | 确认消费方 `settings.gradle.kts` 加了仓库；本地仓库先执行 `:sdk:publish...ProjectLocalRepository` |
 | 拉 Nexus `Read timed out`（curl 却秒通） | 全局代理没绕过内网：`gradle.properties` 加 `systemProp.http.nonProxyHosts=192.168.*|10.*|localhost|127.0.0.1` |
 | 发布报 400 `does not allow updating assets` | Nexus `ALLOW_ONCE` 禁止同版本覆盖：升 `LATENCYPLAYER_VERSION` 再发 |
 | 发布 29MB AAR 超时/502 | Gradle 大文件偶发超时，可 curl 直传（见 1.2 第四步） |
 | 黑屏但状态 PLAYING | `LatencyPlayerView` 不能设不透明背景（`#000000`） |
-| 快速 停止→播放 崩溃 | 已知问题（修复中）；停止后等状态回 `STOPPED` 再 start |
+| 快速 停止→播放 崩溃 | **1.0.7 已修复**（rtmpsrc unlock 竞态，真机压测 120 轮 0 崩溃）；历史规避为停止后等状态回 `STOPPED` 再 start |
 | 连点播放崩溃 | 已修复（1.0.0 含 `gst_object_ref_sink` 修复） |
+| 起播后一直比源流慢约 2.5s（CDN 突发灌入） | **1.0.13 已修复**：appsink `sync=FALSE` + 追帧丢弃，`pipe_backlog` 降到 40–200ms |
+| 退到后台/被冻结返回后黑屏 | **1.0.13 已修复**：视频停止流动 >3s 自动重连（`getLastFrameAgeMs`），后台 22s 返回 ~750ms 出画 |
 | 初始化崩溃 | 检查 ABI 是否被 app `abiFilters` 过滤掉了 SDK 的 so |
 | 首屏慢 | `bufferTime(0)` + `lowLatency(true)` + `fastStartup(true)` |
 | 改配置不生效 | 改完必须再调 `setConfig()` |
