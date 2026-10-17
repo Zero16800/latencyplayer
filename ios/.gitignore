@@ -1,0 +1,21 @@
+# Xcode / build output
+build/
+DerivedData/
+*.xcarchive
+*.xcframework/
+.build/
+Pods/
+
+# XcodeGen / project generation
+*.xcodeproj/
+*.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+
+# Swift Package Manager
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Local xcconfig
+*.local.xcconfig

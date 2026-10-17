@@ -1,0 +1,59 @@
+# XcodeGen spec for the LatencyPlayer iOS SDK + demo.
+#
+#   brew install xcodegen
+#   xcodegen generate --spec project.yml
+#
+# Produces LatencyPlayer.xcodeproj with:
+#   * LatencyPlayer       — the SDK framework (device + simulator)
+#   * LatencyPlayerDemo   — a minimal UIKit sample app
+#
+# The XCFramework is produced by scripts/build-xcframework.sh.
+
+name: LatencyPlayer
+options:
+  deploymentTarget:
+    iOS: "12.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+    CLANG_ENABLE_OBJC_ARC: YES
+    GCC_C_LANGUAGE_STANDARD: gnu11
+    GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) USE_COMMONCRYPTO=1"
+    ENABLE_BITCODE: NO
+    CLANG_WARN_DOCUMENTATION_COMMENTS: NO
+
+targets:
+  LatencyPlayer:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Sources/LatencyPlayer/include
+        headerVisibility: public
+      - path: Sources/LatencyPlayer
+        excludes:
+          - "include/**"
+      - path: third_party/librtmp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.latencyplayer.sdk
+        PRODUCT_NAME: LatencyPlayer
+        DEFINES_MODULE: YES
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/Sources/LatencyPlayer/include $(SRCROOT)/Sources/LatencyPlayer/Internal $(SRCROOT)/third_party/librtmp"
+        OTHER_LDFLAGS: "$(inherited) -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework AVFoundation -framework Security"
+
+  LatencyPlayerDemo:
+    type: application
+    platform: iOS
+    sources:
+      - path: Demo
+    dependencies:
+      - target: LatencyPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.latencyplayer.demo
+        PRODUCT_NAME: LatencyPlayerDemo
+        INFOPLIST_FILE: Demo/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"

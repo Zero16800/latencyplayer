@@ -17,6 +17,10 @@ player.setCallback(callback);
 player.start();
 ```
 
+> **iOS**：轻量原生实现（librtmp + VideoToolbox + AVSampleBufferDisplayLayer），
+> API 与 Android 对齐，交付 XCFramework + Swift Package。见
+> [`ios/README.md`](ios/README.md)。当前 iOS 为**首版脚手架**，视频链路已实现，**音频待实现**。
+
 ---
 
 ## 功能支持
@@ -210,6 +214,7 @@ gradlew :sdk:publishToMavenLocal
 | [doc/USAGE.md](doc/USAGE.md) | 快速接入、常用 API、低延迟配置、异常处理 |
 | [doc/API.md](doc/API.md) | 类 / 方法 / 配置 / 回调 / 状态 / 错误码 |
 | [doc/INTEGRATION.md](doc/INTEGRATION.md) | 环境要求、GStreamer 路径、编译 FAQ、能力范围 |
+| [ios/README.md](ios/README.md) | **iOS SDK**：架构、XCFramework/SPM 构建、Android⇄iOS API 映射、状态与 TODO |
 
 ---
 
