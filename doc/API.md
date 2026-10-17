@@ -1,5 +1,7 @@
 # LatencyPlayer SDK API 文档
 
+> English docs: [API.en.md](API.en.md)。
+
 ## 概述
 
 LatencyPlayer SDK 是基于 **GStreamer 1.28.7** 的 Android 直播播放器 SDK（当前主路径 RTMP 拉流），对外提供 `com.latencyplayer.sdk` 下的 Java API。

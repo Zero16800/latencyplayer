@@ -1,5 +1,7 @@
 # LatencyPlayer SDK 集成指南
 
+> English docs: [INTEGRATION.en.md](INTEGRATION.en.md)。
+
 ## 1. 环境要求
 
 - Android Studio 2022.3+（或命令行 Gradle）

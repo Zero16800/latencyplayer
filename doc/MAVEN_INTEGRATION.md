@@ -1,5 +1,7 @@
 ﻿# LatencyPlayer SDK — Maven 接入与完整使用指南
 
+> English docs: [MAVEN_INTEGRATION.en.md](MAVEN_INTEGRATION.en.md)。
+
 > 坐标：`com.latencyplayer:latencyplayer-sdk:1.0.13`
 > 支持：Maven 本地仓库 / Maven 远程仓库（私有 Nexus、GitHub Packages、阿里云效等）
 

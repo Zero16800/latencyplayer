@@ -1,5 +1,7 @@
 # LatencyPlayer SDK
 
+> English docs: [README.en.md](README.en.md)。
+
 基于 **GStreamer**（Android 静态库）的 Android 直播播放器 SDK。
 主路径：**RTMP 拉流 → 软/硬解 → appsink 直绘 `ANativeWindow`**（绕过 EGL，模拟器也稳定）。
 
@@ -208,13 +210,13 @@ gradlew :sdk:publishToMavenLocal
 
 ## 文档索引
 
-| 文档 | 内容 |
-|------|------|
-| [doc/MAVEN_INTEGRATION.md](doc/MAVEN_INTEGRATION.md) | **Maven 接入（推荐）**、完整接入代码、API 操作、功能与设备支持 |
-| [doc/USAGE.md](doc/USAGE.md) | 快速接入、常用 API、低延迟配置、异常处理 |
-| [doc/API.md](doc/API.md) | 类 / 方法 / 配置 / 回调 / 状态 / 错误码 |
-| [doc/INTEGRATION.md](doc/INTEGRATION.md) | 环境要求、GStreamer 路径、编译 FAQ、能力范围 |
-| [ios/README.md](ios/README.md) | **iOS SDK**：架构、XCFramework/SPM 构建、Android⇄iOS API 映射、状态与 TODO |
+| 文档 | 内容 | English |
+|------|------|---------|
+| [doc/MAVEN_INTEGRATION.md](doc/MAVEN_INTEGRATION.md) | **Maven 接入（推荐）**、完整接入代码、API 操作、功能与设备支持 | [doc/MAVEN_INTEGRATION.en.md](doc/MAVEN_INTEGRATION.en.md) |
+| [doc/USAGE.md](doc/USAGE.md) | 快速接入、常用 API、低延迟配置、异常处理 | [doc/USAGE.en.md](doc/USAGE.en.md) |
+| [doc/API.md](doc/API.md) | 类 / 方法 / 配置 / 回调 / 状态 / 错误码 | [doc/API.en.md](doc/API.en.md) |
+| [doc/INTEGRATION.md](doc/INTEGRATION.md) | 环境要求、GStreamer 路径、编译 FAQ、能力范围 | [doc/INTEGRATION.en.md](doc/INTEGRATION.en.md) |
+| [ios/README.md](ios/README.md) | **iOS SDK**：架构、XCFramework/SPM 构建、Android⇄iOS API 映射、状态与 TODO | [ios/README.en.md](ios/README.en.md) |
 
 ---
 

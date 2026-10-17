@@ -1,5 +1,7 @@
 # LatencyPlayer SDK 使用指南
 
+> English docs: [USAGE.en.md](USAGE.en.md)。
+
 ## 快速开始
 
 ### 1. 添加依赖
