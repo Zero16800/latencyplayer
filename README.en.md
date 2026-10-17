@@ -219,6 +219,7 @@ Version: `LATENCYPLAYER_VERSION` in `gradle.properties` (currently `1.0.13`; Nex
 | [doc/API.en.md](doc/API.en.md) | Classes / methods / config / callbacks / states / error codes |
 | [doc/INTEGRATION.en.md](doc/INTEGRATION.en.md) | Requirements, GStreamer paths, build FAQ, capability scope |
 | [ios/README.md](ios/README.md) | **iOS SDK**: architecture, XCFramework/SPM build, Android⇄iOS API mapping, status & TODO |
+| [android/README.md](android/README.md) | **Android platform**: module structure, build/publish entry points, native layout, doc navigation |
 
 ---
 

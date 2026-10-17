@@ -217,6 +217,7 @@ gradlew :sdk:publishToMavenLocal
 | [doc/API.md](doc/API.md) | 类 / 方法 / 配置 / 回调 / 状态 / 错误码 | [doc/API.en.md](doc/API.en.md) |
 | [doc/INTEGRATION.md](doc/INTEGRATION.md) | 环境要求、GStreamer 路径、编译 FAQ、能力范围 | [doc/INTEGRATION.en.md](doc/INTEGRATION.en.md) |
 | [ios/README.md](ios/README.md) | **iOS SDK**：架构、XCFramework/SPM 构建、Android⇄iOS API 映射、状态与 TODO | [ios/README.en.md](ios/README.en.md) |
+| [android/README.md](android/README.md) | **Android 平台**：模块结构、构建/发布入口、Native 目录、文档导航 | [android/README.en.md](android/README.en.md) |
 
 ---
 
