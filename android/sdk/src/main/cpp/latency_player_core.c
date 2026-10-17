@@ -8,6 +8,7 @@
 #include "latency_player_core.h"
 
 #include <string.h>
+#include <sys/system_properties.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -23,6 +24,39 @@
 
 static GMainLoop *g_player_main_loop = NULL;
 static GThread *g_player_main_thread = NULL;
+
+/* ==============================================================================
+ * 首帧计时插桩（临时诊断）：时间点相对 nativePlay 入口，单位 ms
+ * ============================================================================== */
+static gint64 g_ft_t0_us = 0;
+static gboolean g_ft_src_buf_logged = FALSE;
+static gboolean g_ft_appsink_logged = FALSE;
+static gboolean g_ft_demux_logged = FALSE;
+static gboolean g_ft_parse_logged = FALSE;
+static gboolean g_ft_dec_out_logged = FALSE;
+
+static void ft_log(const char *stage) {
+    if (g_ft_t0_us <= 0) return;
+    gint64 d = (g_get_monotonic_time() - g_ft_t0_us) / 1000;
+    LOGI("FT +%lldms %s", (long long)d, stage);
+}
+
+/* Logs the wall time at which the video decoder emits its first frame. The
+   gap between "first parse buffer" (decoder input) and this point is the pure
+   software-decode cost of the opening GOP. The remaining gap to the
+   input-selector/sink chain creation is playsink setup. */
+static GstPadProbeReturn decoder_src_probe_cb(GstPad *pad, GstPadProbeInfo *info,
+                                              gpointer user_data) {
+    (void)info;
+    (void)user_data;
+    if (!g_ft_dec_out_logged) {
+        g_ft_dec_out_logged = TRUE;
+        gchar *msg = g_strdup_printf("first decoder output (%s)", GST_PAD_NAME(pad));
+        ft_log(msg);
+        g_free(msg);
+    }
+    return GST_PAD_PROBE_REMOVE;
+}
 
 static gpointer player_main_thread_fn(gpointer data) {
     (void)data;
@@ -64,6 +98,8 @@ static void on_async_done(GstBus *bus, GstMessage *msg, gpointer user_data);
 static void on_video_size_changed(GstElement *element, gint width, gint height, gpointer user_data);
 static void on_first_video_frame(GstElement *element, GstPad *pad, gpointer user_data);
 static void on_source_setup(GstElement *playbin, GstElement *source, gpointer user_data);
+static void configure_source_element(LatencyPlayerContext *ctx, GstElement *source);
+static gboolean explicit_pipeline_enabled(void);
 static void on_video_decoder_changed(GstElement *element, GParamSpec *pspec, gpointer user_data);
 static GstBusSyncReply on_bus_sync(GstBus *bus, GstMessage *message, gpointer user_data);
 static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data);
@@ -169,6 +205,10 @@ static GstPadProbeReturn log_vdemux_buffer(GstPad *pad, GstPadProbeInfo *info,
         gint64 *slot = (g_strrstr(GST_PAD_NAME(pad), "video") != NULL)
             ? &ctx->vdemux_max_pts_ms : &ctx->ademux_max_pts_ms;
         if (pts > *slot) *slot = pts;
+        if (!g_ft_demux_logged && g_strrstr(GST_PAD_NAME(pad), "video") != NULL) {
+            g_ft_demux_logged = TRUE;
+            ft_log("first demux video buffer");
+        }
     }
     return GST_PAD_PROBE_OK;
 }
@@ -208,6 +248,10 @@ static GstPadProbeReturn log_vparse_buffer(GstPad *pad, GstPadProbeInfo *info,
         gint64 pts = (gint64)(GST_BUFFER_PTS(buf) / GST_MSECOND);
         if (pts > ctx->vparse_max_pts_ms) {
             ctx->vparse_max_pts_ms = pts;
+        }
+        if (!g_ft_parse_logged) {
+            g_ft_parse_logged = TRUE;
+            ft_log("first parse buffer");
         }
     }
     guint n = (guint)g_atomic_int_add((volatile gint *)&vparse_probe_count, 1);
@@ -352,6 +396,29 @@ static void on_deep_element_added(GstBin *bin, GstBin *sub_bin, GstElement *elem
                                   gpointer user_data) {
     (void)bin;
     (void)sub_bin;
+    if (element != NULL) {
+        GstElementFactory *f = gst_element_get_factory(element);
+        const gchar *fn = f ? gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(f)) : NULL;
+        gchar *msg = g_strdup_printf("element added: %s", fn ? fn : "?");
+        ft_log(msg);
+        g_free(msg);
+        if (fn != NULL &&
+            (g_str_has_prefix(fn, "avdec_") || g_str_has_prefix(fn, "amcviddec") ||
+             g_str_has_prefix(fn, "vtdec") || g_strcmp0(fn, "openh264dec") == 0)) {
+            GstPad *sp = gst_element_get_static_pad(element, "src");
+            if (sp != NULL) {
+                gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_BUFFER,
+                                  decoder_src_probe_cb, NULL, NULL);
+                gst_object_unref(sp);
+            }
+        }
+        /* Explicit-pipeline path: uridecodebin does not emit source-setup on
+           all versions, so configure the RTMP/RTSP source here instead. */
+        if (explicit_pipeline_enabled() && fn != NULL &&
+            (g_strcmp0(fn, "rtmpsrc") == 0 || g_strcmp0(fn, "rtspsrc") == 0)) {
+            configure_source_element((LatencyPlayerContext *)user_data, element);
+        }
+    }
     tune_element_latency(element, user_data);
     if (GST_IS_BIN(element)) {
         LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
@@ -597,6 +664,10 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
         entered_logged = TRUE;
         LOGI("appsink new-sample: ENTERED (callback invoked)");
     }
+    if (!g_ft_appsink_logged) {
+        g_ft_appsink_logged = TRUE;
+        ft_log("first appsink sample");
+    }
     GstSample *sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
     if (sample == NULL) {
         LOGI("appsink new-sample: pull NULL");
@@ -641,7 +712,7 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
                         ctx->catching_up = FALSE;
                         LOGI("catchup: STOP (lag=%" G_GINT64_FORMAT "ms)", lag);
                     }
-                    if (ctx->catching_up) {
+                    if (ctx->catching_up && ctx->first_frame_sent) {
                         static gint64 last_drop_log_us = 0;
                         gint64 now_us = g_get_monotonic_time();
                         if (now_us - last_drop_log_us > 1000000) {
@@ -674,6 +745,7 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
                     ctx->lag_last_log_us = ctx->lag_ref_wall_us;
                     LOGI("First frame post=%d (%dx%d) pts=%" G_GINT64_FORMAT "ms",
                          posted, w, h, ctx->lag_ref_pts_ms);
+                    ft_log("first frame posted");
                     latency_player_send_message(ctx, GST_MSG_FIRST_FRAME, 0, 0);
                 } else if (ctx->lag_ref_pts_ms >= 0) {
                     gint64 now_us = g_get_monotonic_time();
@@ -859,6 +931,45 @@ static gboolean setup_video_pipeline(LatencyPlayerContext *ctx) {
  * 核心API实现
  * ============================================================================== */
 
+/* 提升 Android MediaCodec 硬解器(amcviddec*)的 rank、降低软件解码器 rank，
+ * 让 decodebin/playbin 自动选择硬解。此前实测 decodebin 选了软件 openh264dec，
+ * 软解 720p 关键帧要上百毫秒，是首帧的大头。 */
+static void prefer_hw_decoders(void) {
+    static gboolean done = FALSE;
+    if (done) return;
+    done = TRUE;
+
+    GstRegistry *reg = gst_registry_get();
+    GList *feats = gst_registry_get_feature_list(reg, GST_TYPE_ELEMENT_FACTORY);
+    int hw = 0;
+    for (GList *l = feats; l != NULL; l = l->next) {
+        GstPluginFeature *f = GST_PLUGIN_FEATURE(l->data);
+        const gchar *name = gst_plugin_feature_get_name(f);
+        if (name != NULL && g_str_has_prefix(name, "amcviddec")) {
+            gst_plugin_feature_set_rank(f, GST_RANK_PRIMARY + 100);
+            hw++;
+            LOGI("hw decoder: %s rank -> %d", name, GST_RANK_PRIMARY + 100);
+        }
+    }
+    /* Only demote the software H.264 decoders when a real hardware decoder
+       actually exists. Otherwise keep openh264dec as the primary (libav's
+       avdec_h264 produces decode errors on HLS/TS, see gstreamer_android.c). */
+    if (hw > 0) {
+        for (GList *l = feats; l != NULL; l = l->next) {
+            GstPluginFeature *f = GST_PLUGIN_FEATURE(l->data);
+            const gchar *name = gst_plugin_feature_get_name(f);
+            if (name != NULL &&
+                (g_strcmp0(name, "openh264dec") == 0 ||
+                 g_strcmp0(name, "avdec_h264") == 0 ||
+                 g_strcmp0(name, "avdec_h265") == 0)) {
+                gst_plugin_feature_set_rank(f, GST_RANK_SECONDARY);
+            }
+        }
+    }
+    gst_plugin_feature_list_free(feats);
+    LOGI("prefer_hw_decoders: %d hw decoders found", hw);
+}
+
 int latency_player_init(LatencyPlayerContext *ctx, JavaVM *java_vm, jobject java_obj) {
     if (ctx == NULL) return -1;
 
@@ -870,6 +981,7 @@ int latency_player_init(LatencyPlayerContext *ctx, JavaVM *java_vm, jobject java
     ctx->buffer_time_ms = DEFAULT_BUFFER_TIME_MS;
     ctx->volume = 1.0;
     ctx->decoder_type = DECODER_TYPE_AUTO;
+    prefer_hw_decoders();
     ctx->rtmp_timeout = DEFAULT_RTMP_TIMEOUT_S;
     ctx->rtmp_retry_count = DEFAULT_RTMP_RETRY_COUNT;
     ctx->initialized = TRUE;
@@ -893,10 +1005,172 @@ static gboolean is_live_uri(const char *uri) {
            (len >= 5 && g_ascii_strcasecmp(uri + len - 5, ".m3u8") == 0);
 }
 
+/* ==============================================================================
+ * ② 显式管线（实验性，debug.latencyplayer.explicit=1 开启）
+ *
+ * uridecodebin 解码后的 pad 直接连到 videoconvert!capsfilter!appsink / 音频链，
+ * 去掉 playbin 的 playsink 及其 input-selector，让解码器一协商好 caps 就接到
+ * 下游末端。用于判定开播首帧那段 ~300ms 是 playsink 建链还是软解本身。
+ * ============================================================================== */
+static gboolean g_explicit_pipeline = FALSE;
+static gboolean g_explicit_toggle_read = FALSE;
+
+static gboolean explicit_pipeline_enabled(void) {
+    if (!g_explicit_toggle_read) {
+        g_explicit_toggle_read = TRUE;
+        char v[PROP_VALUE_MAX];
+        v[0] = '\0';
+        if (__system_property_get("debug.latencyplayer.explicit", v) > 0 && v[0] != '\0')
+            g_explicit_pipeline = (v[0] == '1');
+        LOGI("explicit pipeline enabled: %d", g_explicit_pipeline);
+    }
+    return g_explicit_pipeline;
+}
+
+static void configure_appsink(LatencyPlayerContext *ctx, GstElement *sink) {
+    /* RGBx/RGBA only: memory layout matches WINDOW_FORMAT_RGBA_8888 on LE. */
+    GstCaps *caps = gst_caps_from_string("video/x-raw,format=(string){RGBx,RGBA}");
+    g_object_set(sink,
+                 "caps", caps,
+                 "emit-signals", TRUE,
+                 "sync", FALSE,
+                 "max-buffers", 2,
+                 "drop", TRUE,
+                 NULL);
+    gst_caps_unref(caps);
+    g_signal_connect(sink, "new-sample", G_CALLBACK(on_appsink_new_sample), ctx);
+}
+
+/* 音频分支按需创建：decodebin/uridecodebin 只在流里真有音频时才暴露 audio pad。
+ * 若在管线里无条件放一个 autoaudiosink，无音频的流（如本 demo 的纯视频 RTMP）
+ * 会让该 sink 永远无法 preroll，整条管线卡在 PAUSED、appsink 永远收不到帧。 */
+static void ensure_audio_chain(LatencyPlayerContext *ctx, GstPad *pad) {
+    GstElement *aqueue = gst_bin_get_by_name(GST_BIN(ctx->pipeline), "aqueue");
+    if (aqueue != NULL) {
+        GstPad *sinkpad = gst_element_get_static_pad(aqueue, "sink");
+        if (sinkpad != NULL) {
+            if (!GST_PAD_IS_LINKED(sinkpad)) {
+                GstPadLinkReturn lr = gst_pad_link(pad, sinkpad);
+                LOGI("explicit link audio -> aqueue result=%d", (int)lr);
+            }
+            gst_object_unref(sinkpad);
+        }
+        gst_object_unref(aqueue);
+        return;
+    }
+    GstElement *aconv   = gst_element_factory_make("audioconvert", "aconv");
+    GstElement *aresamp = gst_element_factory_make("audioresample", "aresamp");
+    GstElement *asink   = gst_element_factory_make("autoaudiosink", "audiosink");
+    if (aqueue == NULL) aqueue = gst_element_factory_make("queue", "aqueue");
+    if (aqueue == NULL || aconv == NULL || aresamp == NULL || asink == NULL) {
+        LOGE("explicit pipeline: audio element creation failed");
+        return;
+    }
+    gst_bin_add_many(GST_BIN(ctx->pipeline), aqueue, aconv, aresamp, asink, NULL);
+    if (!gst_element_link_many(aqueue, aconv, aresamp, asink, NULL))
+        LOGE("explicit pipeline: audio chain link failed");
+    GstPad *sinkpad = gst_element_get_static_pad(aqueue, "sink");
+    if (sinkpad != NULL) {
+        GstPadLinkReturn lr = gst_pad_link(pad, sinkpad);
+        LOGI("explicit link audio -> aqueue result=%d", (int)lr);
+        gst_object_unref(sinkpad);
+    }
+    ctx->audio_sink = gst_object_ref(asink);
+    gst_element_sync_state_with_parent(aqueue);
+    gst_element_sync_state_with_parent(aconv);
+    gst_element_sync_state_with_parent(aresamp);
+    gst_element_sync_state_with_parent(asink);
+}
+
+static void on_explicit_pad_added(GstElement *src, GstPad *pad, gpointer user_data) {
+    (void)src;
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    if (ctx == NULL || ctx->pipeline == NULL) return;
+
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    if (caps == NULL) caps = gst_pad_query_caps(pad, NULL);
+    const gchar *name = (caps != NULL && gst_caps_get_size(caps) > 0)
+        ? gst_structure_get_name(gst_caps_get_structure(caps, 0))
+        : "";
+    gchar *msg = g_strdup_printf("explicit pad-added %s", name);
+    ft_log(msg);
+    g_free(msg);
+
+    const char *qname = g_str_has_prefix(name, "video/") ? "vqueue" : NULL;
+    if (g_str_has_prefix(name, "audio/")) {
+        ensure_audio_chain(ctx, pad);
+    } else if (qname != NULL) {
+        GstElement *q = gst_bin_get_by_name(GST_BIN(ctx->pipeline), qname);
+        if (q == NULL) {
+            LOGW("explicit: queue %s not found in pipeline", qname);
+        } else {
+            GstPad *sinkpad = gst_element_get_static_pad(q, "sink");
+            if (sinkpad != NULL) {
+                if (GST_PAD_IS_LINKED(sinkpad)) {
+                    LOGI("explicit: %s sink pad already linked", qname);
+                } else {
+                    GstPadLinkReturn lr = gst_pad_link(pad, sinkpad);
+                    LOGI("explicit link %s -> %s result=%d", name, qname, (int)lr);
+                }
+                gst_object_unref(sinkpad);
+            } else {
+                LOGW("explicit: %s has no sink pad", qname);
+            }
+            gst_object_unref(q);
+        }
+    } else {
+        LOGI("explicit: ignoring pad caps %s", name);
+    }
+    if (caps != NULL) gst_caps_unref(caps);
+}
+
+static GstElement *build_explicit_pipeline(LatencyPlayerContext *ctx, const gchar *uri) {
+    GstElement *pipeline = gst_pipeline_new("latencyplayer");
+    GstElement *src     = gst_element_factory_make("uridecodebin", "src");
+    GstElement *vqueue  = gst_element_factory_make("queue", "vqueue");
+    GstElement *vconv   = gst_element_factory_make("videoconvert", "vconv");
+    GstElement *vcaps   = gst_element_factory_make("capsfilter", "vcaps");
+    GstElement *vsink   = gst_element_factory_make("appsink", "videosink");
+
+    if (pipeline == NULL || src == NULL || vqueue == NULL || vconv == NULL ||
+        vcaps == NULL || vsink == NULL) {
+        LOGE("explicit pipeline: element creation failed");
+        if (pipeline != NULL) gst_object_unref(pipeline);
+        return NULL;
+    }
+
+    g_object_set(src, "uri", uri, NULL);
+    GstCaps *vc = gst_caps_from_string("video/x-raw,format=(string){RGBx,RGBA}");
+    g_object_set(vcaps, "caps", vc, NULL);
+    gst_caps_unref(vc);
+
+    gst_bin_add_many(GST_BIN(pipeline), src, vqueue, vconv, vcaps, vsink, NULL);
+    if (!gst_element_link_many(vqueue, vconv, vcaps, vsink, NULL))
+        LOGE("explicit pipeline: video chain link failed");
+
+    g_signal_connect(src, "pad-added", G_CALLBACK(on_explicit_pad_added), ctx);
+    if (g_signal_lookup("source-setup", G_OBJECT_TYPE(src)) > 0)
+        g_signal_connect(src, "source-setup", G_CALLBACK(on_source_setup), ctx);
+    if (g_signal_lookup("deep-element-added", G_OBJECT_TYPE(src)) > 0)
+        g_signal_connect(src, "deep-element-added", G_CALLBACK(on_deep_element_added), ctx);
+
+    configure_appsink(ctx, vsink);
+    ctx->video_sink = gst_object_ref(vsink);
+    LOGI("explicit pipeline built (uridecodebin + direct appsink)");
+    return pipeline;
+}
+
 int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx == NULL || uri == NULL) return -1;
 
     LOGI("Playing URI: %s", uri);
+    g_ft_t0_us = g_get_monotonic_time();
+    g_ft_src_buf_logged = FALSE;
+    g_ft_appsink_logged = FALSE;
+    g_ft_demux_logged = FALSE;
+    g_ft_parse_logged = FALSE;
+    g_ft_dec_out_logged = FALSE;
+    ft_log("nativePlay entry");
     gint64 t_play_start = g_get_monotonic_time ();
     ctx->lag_ref_pts_ms = -1;
     ctx->lag_ref_wall_us = 0;
@@ -937,6 +1211,20 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
 
     GError *error = NULL;
 
+    if (explicit_pipeline_enabled()) {
+        /* ② uridecodebin + 直接连接的 sink 链（无 playsink/input-selector）。 */
+        ctx->use_appsink = TRUE;
+        ctx->first_frame_sent = FALSE;
+        if (ctx->video_sink != NULL) { gst_object_unref(ctx->video_sink); ctx->video_sink = NULL; }
+        if (ctx->audio_sink != NULL) { gst_object_unref(ctx->audio_sink); ctx->audio_sink = NULL; }
+        ctx->pipeline = build_explicit_pipeline(ctx, full_uri);
+        g_free(full_uri);
+        if (ctx->pipeline == NULL) {
+            LOGE("Failed to build explicit pipeline");
+            g_mutex_unlock(&ctx->mutex);
+            return -1;
+        }
+    } else {
     // 创建playbin pipeline
     ctx->pipeline = gst_parse_launch("playbin", &error);
     if (error != NULL) {
@@ -1057,6 +1345,9 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
                          G_CALLBACK(on_deep_element_added), ctx);
         LOGI("deep-element-added connected (flatten queues)");
     }
+    }  /* end playbin branch */
+
+    ft_log("pipeline parsed");
 
     // 设置bus消息监听（必须在主循环上下文中，ensure_main_loop已保证）
     GstBus *bus = gst_element_get_bus(ctx->pipeline);
@@ -1089,6 +1380,7 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         g_mutex_unlock(&ctx->mutex);
         return -1;
     }
+    ft_log("set READY done");
 
     /* playbin VideoOverlay only for glimagesink path; appsink draws itself. */
     if (!ctx->use_appsink) {
@@ -1138,6 +1430,7 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         ctx->is_live_source = TRUE;
         LOGI("Live source detected (NO_PREROLL)");
     }
+    ft_log("set PLAYING done");
 
     ctx->is_playing = TRUE;
 
@@ -1992,7 +2285,6 @@ static void on_state_changed(GstBus *bus, GstMessage *msg, gpointer user_data) {
              gst_element_state_get_name(old_state),
              gst_element_state_get_name(new_state));
 
-        // 发送状态变化消息
         latency_player_send_message(ctx, GST_MSG_STATE_CHANGED, new_state, 0);
 
         // appsink: real FIRST_FRAME comes from on_appsink_new_sample only.
@@ -2074,6 +2366,7 @@ static void on_async_done(GstBus *bus, GstMessage *msg, gpointer user_data) {
     (void)bus;
     (void)msg;
     LOGI("Pipeline async-done (preroll complete)");
+    ft_log("async-done");
     /* Same lock discipline as on_buffering: tune walks ctx->pipeline, which
        stop() frees under this lock. */
     g_mutex_lock(&ctx->mutex);
@@ -2115,6 +2408,10 @@ static GstPadProbeReturn log_src_buffer(GstPad *pad, GstPadProbeInfo *info, gpoi
     (void)pad;
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
     GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (ctx != NULL && !g_ft_src_buf_logged) {
+        g_ft_src_buf_logged = TRUE;
+        ft_log("first src buffer (network recv)");
+    }
     if (ctx != NULL && buf != NULL && GST_BUFFER_PTS_IS_VALID(buf)) {
         gint64 pts = (gint64)(GST_BUFFER_PTS(buf) / GST_MSECOND);
         if (pts > ctx->recv_max_pts_ms) {
@@ -2148,8 +2445,11 @@ static GstPadProbeReturn log_src_buffer(GstPad *pad, GstPadProbeInfo *info, gpoi
 }
 
 static void on_source_setup(GstElement *playbin, GstElement *source, gpointer user_data) {
-    LatencyPlayerContext *ctx = (LatencyPlayerContext *)user_data;
+    (void)playbin;
+    configure_source_element((LatencyPlayerContext *)user_data, source);
+}
 
+static void configure_source_element(LatencyPlayerContext *ctx, GstElement *source) {
     if (source == NULL) return;
 
     /* gst_plugin_feature_get_name() returns a const string owned by the
@@ -2158,6 +2458,7 @@ static void on_source_setup(GstElement *playbin, GstElement *source, gpointer us
     const gchar *source_name = gst_plugin_feature_get_name(
         GST_PLUGIN_FEATURE(gst_element_get_factory(source)));
     LOGI("Source setup: %s", source_name);
+    ft_log("source-setup");
 
     // 针对RTMP source设置参数（不在URI上拼空格参数，避免uri属性解析失败）
     if (g_str_has_prefix(ctx->uri, "rtmp://") || g_str_has_prefix(ctx->uri, "rtmps://")) {

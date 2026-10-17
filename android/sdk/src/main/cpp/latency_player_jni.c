@@ -1,7 +1,7 @@
 /**
- * LatencyPlayer JNI - Java Native Interface实现
+ * LatencyPlayer JNI - Java Native Interface瀹炵幇
  *
- * 桥接Java层和Native层，提供JNI方法实现。
+ * 妗ユ帴Java灞傚拰Native灞傦紝鎻愪緵JNI鏂规硶瀹炵幇銆?
  */
 
 #include <jni.h>
@@ -26,6 +26,12 @@ extern void gst_init_static_plugins(void);
    no installed header. module=NULL selects the static-registration path. */
 extern void g_tls_backend_openssl_register(void *module);
 
+/* gst-plugins-bad androidmedia (libgstandroidmedia.a), no installed header.
+   Hands the JavaVM to GstAmc before gst_init runs plugin_init, so MediaCodec
+   codecs can be enumerated and amcviddec / amcauddec get registered. Without
+   it the registry contains no hardware decoders at all. */
+extern void gst_amc_jni_set_java_vm(JavaVM *java_vm);
+
 #define LOG_TAG "LatencyPlayerJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
@@ -33,13 +39,13 @@ extern void g_tls_backend_openssl_register(void *module);
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 /* ==============================================================================
- * 全局变量
+ * 鍏ㄥ眬鍙橀噺
  * ============================================================================== */
 
-/** GStreamer初始化标志 */
+/** GStreamer鍒濆鍖栨爣蹇?*/
 static gboolean gst_initialized = FALSE;
 
-/** GStreamer初始化锁 */
+/** GStreamer鍒濆鍖栭攣 */
 static pthread_mutex_t gst_init_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* GLib/GIO logs normally go to fd 2, which Android discards, so criticals
@@ -126,7 +132,7 @@ static void gst_log_to_logcat(GstDebugCategory *category,
 }
 
 /* ==============================================================================
- * HTTPS信任锚 (SSL_CERT_FILE)
+ * HTTPS淇′换閿?(SSL_CERT_FILE)
  * ============================================================================== */
 
 /* OpenSSL's compiled-in OPENSSLDIR points at the cerbero build host
@@ -261,15 +267,15 @@ static void setup_ca_bundle(JNIEnv *env, jobject context) {
 }
 
 /* ==============================================================================
- * GStreamer初始化函数
+ * GStreamer鍒濆鍖栧嚱鏁?
  * ============================================================================== */
 
 /**
- * 初始化GStreamer引擎
- * 由GStreamerInitializer.java调用
+ * 鍒濆鍖朑Streamer寮曟搸
+ * 鐢盙StreamerInitializer.java璋冪敤
  *
- * 注意：GStreamer Android库(gstreamer_android.so)由CMake构建系统自动链接，
- * 包含所有配置的插件。gst_init()会自动初始化GStreamer核心和插件。
+ * 娉ㄦ剰锛欸Streamer Android搴?gstreamer_android.so)鐢盋Make鏋勫缓绯荤粺鑷姩閾炬帴锛?
+ * 鍖呭惈鎵€鏈夐厤缃殑鎻掍欢銆俫st_init()浼氳嚜鍔ㄥ垵濮嬪寲GStreamer鏍稿績鍜屾彃浠躲€?
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
@@ -334,6 +340,21 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
         }
     }
 
+    /* androidmedia registers its amcviddec / amcauddec elements from
+       plugin_init, which runs inside gst_init_check(). That enumeration
+       needs the JavaVM up front; otherwise MediaCodec can't be queried and
+       only software decoders (openh264dec/avdec_h264) end up in the
+       registry. Hand it over before gst_init. */
+    {
+        JavaVM *vm = NULL;
+        if ((*env)->GetJavaVM(env, &vm) == 0 && vm != NULL) {
+            gst_amc_jni_set_java_vm(vm);
+            LOGI("androidmedia: JavaVM handed to GstAmc");
+        } else {
+            LOGW("androidmedia: failed to obtain JavaVM");
+        }
+    }
+
     /* Do NOT call gst_init_static_plugins() here. gst_init_check() invokes it
        itself once _gst_plugin_inited is set; calling it before init registers
        nothing (30 assertion failures) and calling it after init registers
@@ -345,7 +366,7 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
         return;
     }
 
-    /* Default WARNING. Per-name LOG only where needed — heavy DEBUG
+    /* Default WARNING. Per-name LOG only where needed 鈥?heavy DEBUG
        categories (flvdemux/h264parse/openh264/decodebin/...) flood logcat
        and chatty expires LatencyPlayerCore startup lines. */
     gst_debug_set_default_threshold(GST_LEVEL_WARNING);
@@ -385,7 +406,7 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeInit(
 }
 
 /**
- * 获取GStreamer版本信息
+ * 鑾峰彇GStreamer鐗堟湰淇℃伅
  */
 JNIEXPORT jstring JNICALL
 Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeGetVersion(
@@ -396,12 +417,12 @@ Java_com_latencyplayer_sdk_internal_GStreamerInitializer_nativeGetVersion(
 }
 
 /* ==============================================================================
- * LatencyPlayerManager JNI方法实现
+ * LatencyPlayerManager JNI鏂规硶瀹炵幇
  * ============================================================================== */
 
 /**
- * 创建播放器实例
- * 返回native句柄
+ * 鍒涘缓鎾斁鍣ㄥ疄渚?
+ * 杩斿洖native鍙ユ焺
  */
 JNIEXPORT jlong JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeCreate(
@@ -409,14 +430,14 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeCreate(
 
     LOGI("Creating native player instance");
 
-    // 分配播放器上下文
+    // 鍒嗛厤鎾斁鍣ㄤ笂涓嬫枃
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)malloc(sizeof(LatencyPlayerContext));
     if (ctx == NULL) {
         LOGE("Failed to allocate memory for player context");
         return 0;
     }
 
-    // 获取JavaVM
+    // 鑾峰彇JavaVM
     JavaVM *java_vm = NULL;
     (*env)->GetJavaVM(env, &java_vm);
     if (java_vm == NULL) {
@@ -425,10 +446,10 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeCreate(
         return 0;
     }
 
-    // 创建全局引用，防止被GC回收
+    // 鍒涘缓鍏ㄥ眬寮曠敤锛岄槻姝㈣GC鍥炴敹
     jobject global_obj = (*env)->NewGlobalRef(env, thiz);
 
-    // 初始化播放器上下文
+    // 鍒濆鍖栨挱鏀惧櫒涓婁笅鏂?
     int ret = latency_player_init(ctx, java_vm, global_obj);
     if (ret != 0) {
         LOGE("Failed to initialize player context");
@@ -442,7 +463,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeCreate(
 }
 
 /**
- * 设置Surface
+ * 璁剧疆Surface
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetSurface(
@@ -463,7 +484,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetSurface(
 }
 
 /**
- * 最近一次收到视频帧的年龄(ms)，-1=从未收到（后台/卡死看门狗用）
+ * 鏈€杩戜竴娆℃敹鍒拌棰戝抚鐨勫勾榫?ms)锛?1=浠庢湭鏀跺埌锛堝悗鍙?鍗℃鐪嬮棬鐙楃敤锛?
  */
 JNIEXPORT jlong JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeLastFrameAgeMs(
@@ -475,7 +496,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeLastFrameAgeMs(
 }
 
 /**
- * 开始播放
+ * 寮€濮嬫挱鏀?
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePlay(
@@ -493,7 +514,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePlay(
 }
 
 /**
- * 停止播放
+ * 鍋滄鎾斁
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeStop(
@@ -506,7 +527,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeStop(
 }
 
 /**
- * 暂停播放
+ * 鏆傚仠鎾斁
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePause(
@@ -519,7 +540,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePause(
 }
 
 /**
- * 恢复播放
+ * 鎭㈠鎾斁
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeResume(
@@ -532,7 +553,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeResume(
 }
 
 /**
- * 设置静音
+ * 璁剧疆闈欓煶
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetMute(
@@ -545,7 +566,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetMute(
 }
 
 /**
- * 设置音量
+ * 璁剧疆闊抽噺
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetVolume(
@@ -554,13 +575,13 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetVolume(
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;
     if (ctx == NULL) return;
 
-    // Java层传入0-100，转换为0.0-1.0
+    // Java灞備紶鍏?-100锛岃浆鎹负0.0-1.0
     gdouble vol = (gdouble)volume / 100.0;
     latency_player_set_volume(ctx, vol);
 }
 
 /**
- * 设置缓冲时间
+ * 璁剧疆缂撳啿鏃堕棿
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetBufferTime(
@@ -573,7 +594,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetBufferTime(
 }
 
 /**
- * 设置低延迟模式
+ * 璁剧疆浣庡欢杩熸ā寮?
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetLowLatency(
@@ -586,7 +607,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetLowLatency(
 }
 
 /**
- * 设置播放方向
+ * 璁剧疆鎾斁鏂瑰悜
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetOrientation(
@@ -595,11 +616,11 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetOrientation(
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;
     if (ctx == NULL) return;
 
-    // 根据方向设置旋转角度
+    // 鏍规嵁鏂瑰悜璁剧疆鏃嬭浆瑙掑害
     gint degrees = 0;
     switch (orientation) {
-        case 1: degrees = 0; break;   // 竖屏
-        case 2: degrees = 90; break;  // 横屏
+        case 1: degrees = 0; break;   // 绔栧睆
+        case 2: degrees = 90; break;  // 妯睆
         default: degrees = 0; break;
     }
 
@@ -607,7 +628,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetOrientation(
 }
 
 /**
- * 设置视频翻转
+ * 璁剧疆瑙嗛缈昏浆
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetFlip(
@@ -620,7 +641,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetFlip(
 }
 
 /**
- * 设置视频旋转角度
+ * 璁剧疆瑙嗛鏃嬭浆瑙掑害
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetRotation(
@@ -633,7 +654,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSetRotation(
 }
 
 /**
- * 保存截图（成功返回 true）
+ * 淇濆瓨鎴浘锛堟垚鍔熻繑鍥?true锛?
  */
 JNIEXPORT jboolean JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSaveSnapshot(
@@ -652,7 +673,7 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeSaveSnapshot(
 }
 
 /**
- * 释放播放器资源
+ * 閲婃斁鎾斁鍣ㄨ祫婧?
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeRelease(
@@ -663,13 +684,13 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeRelease(
 
     LOGI("Releasing native player: %p", ctx);
 
-    // 释放Java全局引用
+    // 閲婃斁Java鍏ㄥ眬寮曠敤
     if (ctx->java_obj != NULL) {
         (*env)->DeleteGlobalRef(env, ctx->java_obj);
         ctx->java_obj = NULL;
     }
 
-    // 释放播放器上下文
+    // 閲婃斁鎾斁鍣ㄤ笂涓嬫枃
     latency_player_release(ctx);
     free(ctx);
 }

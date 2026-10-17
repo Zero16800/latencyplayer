@@ -12,6 +12,9 @@ import androidx.annotation.Nullable;
 import com.latencyplayer.sdk.internal.GStreamerInitializer;
 import com.latencyplayer.sdk.internal.ReconnectManager;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * RTMP播放器核心管理类
  * <p>
@@ -40,7 +43,14 @@ public class LatencyPlayerManager {
     }
 
     /** Native层句柄 */
-    private long nativeHandle;
+    private volatile long nativeHandle;
+
+    /**
+     * 控制线程：所有可能阻塞的 native 调用（建管线、RTMP 连接等，可能耗时上百毫秒）
+     * 都提交到这里串行执行，避免卡住调用方（通常是主线程）。
+     * 单线程保证 play/stop/switchUrl 等操作的先后顺序。
+     */
+    private final ExecutorService controlExecutor = Executors.newSingleThreadExecutor();
 
     /** 主线程Handler */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -181,7 +191,17 @@ public class LatencyPlayerManager {
 
         Log.i(TAG, "Starting playback: " + config.getUrl());
         setState(LatencyPlayerState.BUFFERING);
-        nativePlay(nativeHandle, config.getUrl());
+        final long handle = nativeHandle;
+        final String url = config.getUrl();
+        // nativePlay 内部会同步阻塞完成 RTMP 连接（实测 100~470ms），
+        // 放到控制线程执行，start() 立即返回，不卡主线程。
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (isReleased || handle == 0) return;
+                nativePlay(handle, url);
+            }
+        });
 
         if (config.isAutoReconnect()) {
             reconnectManager.startMonitor();
@@ -195,7 +215,13 @@ public class LatencyPlayerManager {
         checkInitialized();
         Log.i(TAG, "Stopping playback");
         reconnectManager.stop();
-        nativeStop(nativeHandle);
+        final long handle = nativeHandle;
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (handle != 0) nativeStop(handle);
+            }
+        });
         setState(LatencyPlayerState.STOPPED);
     }
 
@@ -205,7 +231,13 @@ public class LatencyPlayerManager {
     public void pause() {
         checkInitialized();
         Log.d(TAG, "Pausing playback");
-        nativePause(nativeHandle);
+        final long handle = nativeHandle;
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (handle != 0) nativePause(handle);
+            }
+        });
         setState(LatencyPlayerState.PAUSED);
     }
 
@@ -215,7 +247,13 @@ public class LatencyPlayerManager {
     public void resume() {
         checkInitialized();
         Log.d(TAG, "Resuming playback");
-        nativeResume(nativeHandle);
+        final long handle = nativeHandle;
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (handle != 0) nativeResume(handle);
+            }
+        });
         setState(LatencyPlayerState.PLAYING);
     }
 
@@ -266,9 +304,17 @@ public class LatencyPlayerManager {
         checkInitialized();
         Log.i(TAG, "Switching URL to: " + newUrl);
         config.setUrl(newUrl);
-        nativeStop(nativeHandle);
         setState(LatencyPlayerState.BUFFERING);
-        nativePlay(nativeHandle, newUrl);
+        final long handle = nativeHandle;
+        final String url = newUrl;
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (handle == 0) return;
+                nativeStop(handle);
+                nativePlay(handle, url);
+            }
+        });
     }
 
     /**
@@ -346,13 +392,19 @@ public class LatencyPlayerManager {
             return;
         }
         Log.d(TAG, "Releasing player");
-        reconnectManager.stop();
-        if (nativeHandle != 0) {
-            nativeRelease(nativeHandle);
-            nativeHandle = 0;
-        }
         isReleased = true;
         isInitialized = false;
+        reconnectManager.stop();
+        final long handle = nativeHandle;
+        nativeHandle = 0;
+        // 排在所有已提交的控制操作之后执行，保证释放时不会有 play/stop 在跑
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (handle != 0) nativeRelease(handle);
+            }
+        });
+        controlExecutor.shutdown();
     }
 
     // ========== 内部方法 ==========
