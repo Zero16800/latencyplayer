@@ -674,8 +674,45 @@ static GstFlowReturn on_appsink_new_sample(GstElement *sink, gpointer user_data)
         return GST_FLOW_ERROR;
     }
 
+    /* ⑫ 预连接期间管线处于 PAUSED（preroll），此刻拉到的样本不能绘制：
+     * 双实例共用 SurfaceView，会往正在播放的另一个实例的 Surface 上
+     * 画陈旧帧；也会提前发 FIRST_FRAME 让 demo 过早收起冻结帧。 */
+    /* ⑫ PAUSED/preroll 或"持有"（preconnect_hold：管线已 PLAYING 但样本全部
+     *  丢弃）期间的样本都不能绘制：双实例共用 SurfaceView，不能往正在播放
+     *  的实例 Surface 上画帧；也不能发 FIRST_FRAME（首帧必须来自 play() 放行
+     *  之后，demo 才收冻结帧）。 */
+    if (!ctx->is_playing || ctx->preconnect_hold) {
+        if (!ctx->video_preroll_seen) {
+            ctx->video_preroll_seen = TRUE;
+            LOGI("PRECONNECT: video preroll sample seen (cb)");
+        }
+        static gint64 last_paused_drop_log = 0;
+        gint64 now2 = g_get_monotonic_time();
+        if (now2 - last_paused_drop_log > 1000000) {
+            last_paused_drop_log = now2;
+            GstBuffer *d = gst_sample_get_buffer(sample);
+            if (d != NULL && GST_BUFFER_PTS_IS_VALID(d)) {
+                LOGI("preroll sample dropped (paused) pts=%" G_GINT64_FORMAT "ms",
+                     (gint64)(GST_BUFFER_PTS(d) / GST_MSECOND));
+            } else {
+                LOGI("preroll sample dropped (paused) pts=invalid");
+            }
+        }
+        gst_sample_unref(sample);
+        return GST_FLOW_OK;
+    }
+    ctx->video_preroll_seen = TRUE;
+
     /* 标记视频仍在流动（丢弃/未绘制也算），供上层卡死看门狗判断 */
     ctx->last_video_sample_wall_us = g_get_monotonic_time();
+
+    /* 快速路径诊断：PLAYING 后到首个可用样本的间隔 */
+    if (ctx->fastpath_us != 0) {
+        gint64 d = g_get_monotonic_time() - ctx->fastpath_us;
+        LOGI("FASTPATH first sample after set_state(PLAYING): %lld us",
+             (long long)d);
+        ctx->fastpath_us = 0;
+    }
 
     GstBuffer *buffer = gst_sample_get_buffer(sample);
     GstCaps *caps = gst_sample_get_caps(sample);
@@ -1166,19 +1203,20 @@ int latency_player_preconnect(LatencyPlayerContext *ctx, const char *uri) {
     LOGI("Preconnect requested for URI: %s", uri);
 
     g_mutex_lock(&ctx->mutex);
+    gboolean holding_same = (ctx->preconnect_hold && ctx->pipeline != NULL &&
+                             ctx->uri != NULL &&
+                             g_strcmp0(uri, ctx->uri) == 0);
+    gboolean pipeline_busy = (ctx->preconnect_hold || ctx->is_playing);
+    g_mutex_unlock(&ctx->mutex);
 
-    /* 已对同一URI预连接过：直接复用，不重建。 */
-    if (ctx->preconnected && ctx->uri != NULL &&
-        g_strcmp0(uri, ctx->uri) == 0 && ctx->pipeline != NULL) {
-        LOGI("Preconnect: already preconnected to %s, keep", uri);
-        g_mutex_unlock(&ctx->mutex);
+    /* 已对同一URI预连接（持有中）：直接复用，不重建。 */
+    if (holding_same) {
+        LOGI("Preconnect: already holding %s, keep", uri);
         return 0;
     }
 
-    g_mutex_unlock(&ctx->mutex);
-
-    /* 若已预连接到不同URI：先拆掉旧的预连接管线。 */
-    if (ctx->preconnected) {
+    /* 管线在用（播放中或预连接到不同URI）：先拆掉旧管线。 */
+    if (pipeline_busy) {
         LOGI("Preconnect: switching target URI, tearing down old pipeline");
         latency_player_stop(ctx);
     }
@@ -1187,7 +1225,7 @@ int latency_player_preconnect(LatencyPlayerContext *ctx, const char *uri) {
     int ret = latency_player_play(ctx, uri);
     if (ret != 0) {
         ctx->preconnect_mode = FALSE;
-        ctx->preconnected = FALSE;
+        ctx->preconnect_hold = FALSE;
     }
     return ret;
 }
@@ -1195,9 +1233,11 @@ int latency_player_preconnect(LatencyPlayerContext *ctx, const char *uri) {
 int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx == NULL || uri == NULL) return -1;
 
-    /* ⑫ RTMP预连接快速路径：preconnect() 已把管线建到 PAUSED（RTMP 握手
-     * 已完成），同 URI 的 play() 只需 PAUSED->PLAYING，省去建管线+建连。*/
-    if (ctx->preconnected && !ctx->preconnect_mode &&
+    /* ⑫ RTMP预连接快速路径："持有"管线（已 PLAYING 持续消费流, 样本全部
+     * 丢弃）命中同 URI 的 play() 时只需放行（hold=FALSE, is_playing=TRUE）,
+     * 下一个可用样本即刻出画（预连接期间 catchup 已把落后消化到直播边缘）。*/
+    if (ctx->preconnect_hold && !ctx->preconnect_mode &&
+        ctx->pipeline != NULL &&
         ctx->uri != NULL && g_strcmp0(uri, ctx->uri) == 0) {
         g_ft_t0_us = g_get_monotonic_time();
         g_ft_src_buf_logged = FALSE;
@@ -1207,19 +1247,21 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         g_ft_dec_out_logged = FALSE;
         ft_log("nativePlay entry (preconnected)");
         LOGI("Preconnect fast path: PAUSED->PLAYING for %s", uri);
-        g_mutex_lock(&ctx->mutex);
-        if (ctx->pipeline == NULL) {
-            ctx->preconnected = FALSE;
-            g_mutex_unlock(&ctx->mutex);
-            LOGI("Preconnect pipeline gone, falling back to full play");
-        } else {
-            gint64 t_fast0 = g_get_monotonic_time();
-            GstStateChangeReturn fast_ret =
-                gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
-            gint64 t_fast1 = g_get_monotonic_time();
-            ctx->preconnected = FALSE;
-            ctx->is_playing = TRUE;
-            g_mutex_unlock(&ctx->mutex);
+            g_mutex_lock(&ctx->mutex);
+            if (ctx->pipeline == NULL) {
+                ctx->preconnected = FALSE;
+                g_mutex_unlock(&ctx->mutex);
+                LOGI("Preconnect pipeline gone, falling back to full play");
+            } else {
+                gint64 t_fast0 = g_get_monotonic_time();
+                GstStateChangeReturn fast_ret =
+                    gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
+                gint64 t_fast1 = g_get_monotonic_time();
+                ctx->preconnected = FALSE;
+                ctx->preconnect_hold = FALSE;
+                ctx->is_playing = TRUE;
+                ctx->fastpath_us = t_fast0;
+                g_mutex_unlock(&ctx->mutex);
             LOGI("Preconnect fast path: set PLAYING ret=%d took %lld us",
                  (int)fast_ret, (long long)(t_fast1 - t_fast0));
             latency_player_send_message(ctx, GST_MSG_CONNECTED, 0, 0);
@@ -1229,6 +1271,7 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
 
     LOGI("Playing URI: %s", uri);
     if (!ctx->preconnect_mode) ctx->preconnected = FALSE;
+    ctx->preconnect_hold = FALSE;
     g_ft_t0_us = g_get_monotonic_time();
     g_ft_src_buf_logged = FALSE;
     g_ft_appsink_logged = FALSE;
@@ -1481,30 +1524,44 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         LOGI("appsink path: window bound via ctx->native_window");
     }
 
-    /* ⑫ 预连接模式：建管线 + RTMP 握手完成后停在 PAUSED，不进入 PLAYING。
-     * 后续同 URI 的 play() 走顶部快速路径，只做 PAUSED->PLAYING。 */
+    /* ⑫ 预连接模式：建管线（含 RTMP 握手）且立即 PLAYING 来"持有"流：
+     * 后台持续消费（关键帧解码、playbin 视频链建立都在这一步完成），
+     * 样本走 preconnect_hold 丢弃路径（不画共享 Surface、不发 FIRST_FRAME）。
+     * 数据到达 PAUSED 会由音频链提前 completion（视频链此时尚未建),
+     * 停在 PAUSED 等不到视频数据——实测 PLAYING 后数据才真正流向视频支链。
+     * play() 放行（is_playing=TRUE, hold=FALSE）后下一帧 ~30ms 内出画，
+     * 且因后台 catchup 连续丢弃陈旧帧, 出画即贴直播边缘的新帧。 */
     if (ctx->preconnect_mode) {
         ctx->preconnect_mode = FALSE;
-        LOGI("PRECONNECT: setting pipeline PAUSED (window=%p)...", ctx->native_window);
+        LOGI("PRECONNECT: setting pipeline PLAYING-hold (window=%p)...",
+             ctx->native_window);
         GstStateChangeReturn pre_ret =
-            gst_element_set_state(ctx->pipeline, GST_STATE_PAUSED);
-        LOGI("PRECONNECT: set PAUSED ret=%d", (int)pre_ret);
+            gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
+        LOGI("PRECONNECT: set PLAYING ret=%d", (int)pre_ret);
         if (pre_ret == GST_STATE_CHANGE_FAILURE) {
-            LOGE("PRECONNECT: failed to reach PAUSED, clearing preconnect");
+            LOGE("PRECONNECT: failed to reach PLAYING, clearing preconnect");
             gst_object_unref(ctx->pipeline);
             ctx->pipeline = NULL;
             ctx->preconnected = FALSE;
             g_mutex_unlock(&ctx->mutex);
             return -1;
         }
-        ctx->preconnected = TRUE;
+        ctx->preconnect_hold = TRUE;
         ctx->is_playing = FALSE;
+        if (ctx->low_latency) {
+            tune_pipeline_queues(GST_BIN(ctx->pipeline));
+        }
+        /* 不在此处等待视频首样本:等待期间(无论持 ctx->mutex 还是仅轮询)
+         * 实测都会把首个样本的交付推迟到等待结束后(多次复现,延迟≈等待时长)。
+         * preconnect() 立即返回;play() 快速路径按 preconnect_hold 判定,
+         * 放行(hold=FALSE)后下一个可用样本即刻出画——若视频链已建好
+         * (video_preroll_seen) 则 ~30ms,否则退化为普通冷启动速度。 */
         gint64 t_pre_end = g_get_monotonic_time ();
         LOGI("TIMING: preconnect took %" G_GINT64_FORMAT " us",
              (t_pre_end - t_play_start));
         latency_player_send_message(ctx, GST_MSG_CONNECTED, 0, 0);
         g_mutex_unlock(&ctx->mutex);
-        LOGI("Preconnect done (pipeline PAUSED)");
+        LOGI("Preconnect done (PLAYING-hold)");
         return 0;
     }
 
@@ -1570,6 +1627,7 @@ int latency_player_stop(LatencyPlayerContext *ctx) {
 
     ctx->is_playing = FALSE;
     ctx->is_live_source = FALSE;
+    ctx->preconnect_hold = FALSE;
 
     g_mutex_unlock(&ctx->mutex);
     return 0;

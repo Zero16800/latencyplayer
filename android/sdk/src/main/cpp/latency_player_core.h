@@ -163,6 +163,17 @@ typedef struct LatencyPlayerContext {
     /** 预连接模式（play() 内部用）：建好后停在 PAUSED 而非 PLAYING */
     gboolean preconnect_mode;
 
+    /** 调试埋点：快速路径 set_state(PLAYING) 完成时刻，用于计算到首样本回调的间隔 */
+    gint64 fastpath_us;
+
+    /** ⑫ 预连接就绪判定：视频 appsink 已收到过样本（playbin 的 ASYNC PAUSED
+     *  可能仅由音频链完成，视频链此时尚未建立；必须等到首个视频样本）。 */
+    gboolean video_preroll_seen;
+
+    /** ⑫ 预连接"持有"模式：管线已 PLAYING 持续消费流，但样本全部丢弃
+     *  （不绘制、不发 FIRST_FRAME），play() 放行后下一帧即出画。 */
+    gboolean preconnect_hold;
+
     /** E2E 滞后测量：本次播放首帧渲染时的 PTS(ms) 与单调墙钟(us)，-1=未记录 */
     gint64 lag_ref_pts_ms;
     gint64 lag_ref_wall_us;
