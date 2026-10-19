@@ -77,7 +77,7 @@ player.start();
 
 | 指标 | 结果 | 计时方式 |
 |------|------|---------|
-| 首帧（点击播放 → 首帧渲染） | **avg 491 ms**（3 次：457 / 491 / 528 ms） | 点击的设备时刻 → logcat `First frame post` 时间戳 |
+| 首帧（点击播放 → 首帧渲染；普通冷启动，未预连接） | **avg 491 ms**（3 次：457 / 491 / 528 ms） | 点击的设备时刻 → logcat `First frame post` 时间戳 |
 | 稳态画面延迟（相对 PC 低延迟参考） | **53–174 ms，中位 ~125 ms**（16 次有效采样） | 逐帧内容匹配，见下 |
 
 稳态测量方法：PC 端用 `ffmpeg -fflags +nobuffer -flags low_delay` 拉同一直播流，缓存「帧到达时刻 + 128x206 灰度帧」；手机端 `screencap`（raw 格式，设备侧 `date +%s.%3N` 时间戳，采集窗口 ~200 ms）截图裁剪播放区域，与 PC 帧做 SAD 逐帧匹配。匹配质量 `best_diff ≈ 2.7`、次优帧 ≥ 4（存在明确波谷），设备/PC 时钟用 `adb shell date` 对齐（rtt ~100 ms）。

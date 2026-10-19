@@ -42,7 +42,7 @@ android/
 - GStreamer Android SDK **1.28.7**: `E:\Android-SDK\NDK-CMake-GStreamer` (`GSTREAMER_ROOT_ANDROID` in `gradle.properties`)
 - NDK `25.1.8937393`, CMake `3.22.1`, JDK 17, AGP 8.2 / Gradle 8.2
 - minSdk 21 / targetSdk 34 / compileSdk 34; ABI: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`
-- Version: `LATENCYPLAYER_VERSION` in `gradle.properties` (currently `1.0.13`)
+- Version: `LATENCYPLAYER_VERSION` in `gradle.properties` (currently `1.0.15`)
 
 ## Build the Demo
 

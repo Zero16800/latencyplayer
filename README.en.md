@@ -37,6 +37,7 @@ player.start();
 | Low-latency mode | ✅ | `bufferTime=0` + `lowLatency=true`, see "Latency" below |
 | Auto-reconnect on disconnect | ✅ | Interval / count configurable, `maxReconnectCount(0)` = unlimited |
 | Background-return self-recovery | ✅ | 1.0.13: after backgrounding / being frozen and returning, if video stops flowing for >3 s it auto-reconnects (`getLastFrameAgeMs` + `ReconnectManager` stall watchdog) |
+| Preconnect (millisecond stream switching) | ✅ | 1.0.15: `preconnect(url)` hold mode — builds the link, decodes the first frame and absorbs the CDN burst backlog in the background; same-URL playback renders instantly; dual-instance switching tap→first-frame **avg 173 ms** |
 | Pause / resume / stop | ✅ | |
 | Hot URL switch | ✅ | `switchUrl`, pipeline is not destroyed |
 | Mute / volume | ✅ | 0–100 |
@@ -78,7 +79,7 @@ Plugin registration list: `android/sdk/src/main/cpp/gstreamer_android.c`; link w
 
 | Metric | Result | Timing method |
 |--------|--------|---------------|
-| First frame (tap play → first frame rendered) | **avg 491 ms** (3 runs: 457 / 491 / 528 ms) | device time at tap → logcat `First frame post` timestamp |
+| First frame (tap play → first frame rendered, plain cold start without preconnect) | **avg 491 ms** (3 runs: 457 / 491 / 528 ms) | device time at tap → logcat `First frame post` timestamp |
 | Steady-state picture latency (relative to a PC low-latency reference) | **53–174 ms, median ~125 ms** (16 valid samples) | per-frame content matching, see below |
 
 Steady-state method: on the PC, pull the same live stream with `ffmpeg -fflags +nobuffer -flags low_delay`, caching "frame arrival time + 128x206 grayscale frame"; on the phone, `screencap` (raw format, device-side `date +%s.%3N` timestamp, capture window ~200 ms) crop the playback area and SAD-match frame-by-frame against PC frames. Match quality `best_diff ≈ 2.7`, runner-up frame ≥ 4 (a clear valley exists); device/PC clocks aligned with `adb shell date` (rtt ~100 ms).
@@ -120,6 +121,24 @@ At the moment an RTMP connection is established, a CDN (e.g. Alibaba Cloud) burs
 - the appsink callback performs **catch-up dropping** based on "live edge − current frame PTS" (enters catch-up and drops old frames when lagging >600 ms, exits below <200 ms), skipping frames only, never rendering stale frames, avoiding a "fast-forward" feel.
 
 After the fix, the player-side backlog `pipe_backlog` dropped from **~2550 ms to 40–200 ms** (same order as `vdemux` / `vparse` probes); catch-up takes ~0.2–0.3 s; first frame on this link (Alibaba Cloud CDN) is ≈0.9 s, slightly later than without dropping (acceptable). Log evidence: `catchup: START drop (lag=2361ms)` → `catchup: STOP (lag=199ms)` → `First frame post=1`.
+
+### Preconnect millisecond stream switching (1.0.15)
+
+`preconnect(url)` (hold mode) moves everything — RTMP connect + CDN burst delivery + burst-backlog absorption + the first keyframe software decode (~300–500 ms) — to the background **before** the tap:
+
+- after `preconnect()`, the pipeline runs straight to PLAYING and keeps consuming the stream in the background, but **does not render to the Surface and does not fire FIRST_FRAME** (samples are silently dropped; the catch-up-dropping logic meanwhile absorbs the lag to the live edge);
+- `start()` / `switchUrl()` on the same URL just releases the hold; the next decoded frame (a fresh one hugging the live edge) renders immediately;
+- `preconnect()` itself returns in ~200–400 ms and does not block the calling thread; each preconnect holds one RTMP connection + one software decoder.
+
+Why "parked at PAUSED" does not work: playbin's `ASYNC→PAUSED` can complete from the **audio branch alone** — at that moment the video branch (input-selector/appsink) does not exist yet, and decodebin only exposes the video pad after the first keyframe has **finished decoding**. The preconnected pipeline therefore has to run to PLAYING so the video chain is built in the background and `play()` finds a ready frame.
+
+Measured (Xiaomi 11, dual-instance demo — two Alibaba Cloud RTMP 720x1280 H.264 streams, one preconnected each at startup, roles swapped on every switch):
+
+| Metric | Result |
+|--------|--------|
+| Switch tap → new stream first frame | **avg 173 ms** (8 switches: 37 / 172–228 ms) |
+| Startup first tap (preconnected) | 37–96 ms |
+| Ordinary switch without preconnect (baseline) | ~1000–1135 ms |
 
 ---
 
@@ -168,7 +187,7 @@ After the fix, the player-side backlog `pipe_backlog` dropped from **~2550 ms to
 
 1.0.4 is on par with 1.0.3, only adding the `window_mutex` lock code for the repeated-playback ANR fix (under 1 MB, no change after rounding).
 
-1.0.5–1.0.13 are on par with 1.0.4: the period consisted of native code fixes (rtmpsrc unlock patch, appsink `sync=FALSE` + catch-up dropping, stall watchdog) and API additions, with no new linked libraries.
+1.0.5–1.0.15 are on par with 1.0.4: the period consisted of native code fixes (rtmpsrc unlock patch, appsink `sync=FALSE` + catch-up dropping, stall watchdog, RTMP preconnect hold mode) and API additions, with no new linked libraries.
 
 Trim measures: `CMakeLists.txt` links only the core-library whitelist + a 34-plugin whitelist (whole-archive for plugins only), strip, Bionic missing-symbol stubs (`vk*` / `getgrgid_r` etc.), and `ff_localize.map` localizing FFmpeg `ff_*` symbols to satisfy PIC linking. Link integrity is enforced by `LINKER:--no-undefined`.
 
@@ -185,7 +204,7 @@ maven {
 // or, during development, a local repo: maven { url = uri("file:///E:/Android-SDK/maven-repo") }
 
 // android/app/build.gradle.kts
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.15")
 ```
 
 Publishing (credentials passed via `-P`, never stored):
@@ -203,7 +222,7 @@ rem publish to the local ~/.m2
 gradlew :sdk:publishToMavenLocal
 ```
 
-Version: `LATENCYPLAYER_VERSION` in `gradle.properties` (currently `1.0.13`; Nexus `ALLOW_ONCE` forbids overwriting the same version, so upgrades must increment).
+Version: `LATENCYPLAYER_VERSION` in `gradle.properties` (currently `1.0.15`; Nexus `ALLOW_ONCE` forbids overwriting the same version, so upgrades must increment).
 
 > If your machine's `~/.gradle` has a global proxy, the intranet Nexus needs `systemProp.http.nonProxyHosts=192.168.*` (already set in the project `gradle.properties`).
 > Full integration code (Manifest / layout / MainActivity / ProGuard) is in [doc/MAVEN_INTEGRATION.en.md](doc/MAVEN_INTEGRATION.en.md).
