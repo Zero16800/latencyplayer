@@ -1,4 +1,4 @@
-# LatencyPlayer SDK
+# 蓝汐播放器 SDK
 
 > English docs: [README.en.md](README.en.md)。
 
