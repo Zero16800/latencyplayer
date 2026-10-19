@@ -136,6 +136,24 @@ boolean muted = player.isMute();
 player.switchUrl("rtmp://new-url/live/stream2");
 ```
 
+### 预连接（1.0.15）
+
+提前建立 RTMP 连接、完成 CDN 建连与首个关键帧解码，后续同 URL 播放直接出画：
+
+```java
+// 提前预热（可反复调用；同 URL 复用现有连接，不同 URL 自动重建）
+player.preconnect("rtmp://example.com/live/stream");
+
+// 业务需要时（秒级）开播
+player.start();   // 同 URL 且未被 stop() 时直接放行出画（stop() 会释放预连接）
+```
+
+工作方式（hold 模式）：`preconnect()` 把管线直接开到 PLAYING，后台持续消费流（解码、播放链建立、CDN 突发积压消耗全在预热期完成），但不向渲染 Surface 出画、不发 FIRST_FRAME 回调；`start()` / `switchUrl()` 命中同一 URL 时只放行（hold=FALSE），下一个解码帧（贴近直播边缘的新帧）即刻出画。
+
+- `preconnect()` 本身 ~200–400ms 返回，不阻塞业务线程（内部在控制线程池）
+- 双实例场景（A 播放 B 预热，切换时角色互换）点击→新流首帧实测 **~173ms**（8 连切 min 37 / max 228ms，小米 11）
+- 注意：每个预连接实例会占用一条 RTMP 连接 + 一个软解码器；用 `stop()` / `release()` 释放
+
 ### 截图
 
 ```java

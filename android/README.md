@@ -39,7 +39,7 @@ android/
 - GStreamer Android SDK **1.28.7**：`E:\Android-SDK\NDK-CMake-GStreamer`（`gradle.properties` 的 `GSTREAMER_ROOT_ANDROID`）
 - NDK `25.1.8937393`、CMake `3.22.1`、JDK 17、AGP 8.2 / Gradle 8.2
 - minSdk 21 / targetSdk 34 / compileSdk 34；ABI：`armeabi-v7a`、`arm64-v8a`、`x86`、`x86_64`
-- 版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.13`）
+- 版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.15`）
 
 ## 构建 Demo
 

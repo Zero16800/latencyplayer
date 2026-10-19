@@ -35,6 +35,7 @@ player.start();
 | 低延迟模式 | ✅ | `bufferTime=0` + `lowLatency=true`，见下文「延迟」 |
 | 断线自动重连 | ✅ | 间隔 / 次数可配，`maxReconnectCount(0)` = 无限 |
 | 后台返回自恢复 | ✅ | 1.0.13：退后台 / 被系统冻结返回后，若视频停止流动 >3s 自动重连恢复（`getLastFrameAgeMs` + `ReconnectManager` 卡死看门狗） |
+| 预连接（毫秒级切流） | ✅ | 1.0.15：`preconnect(url)` hold 模式——后台建链 + 解码首帧 + 吃掉 CDN 突发积压，同 URL 播放直接出画；双实例切换点击→首帧 **avg 173ms** |
 | 暂停 / 恢复 / 停止 | ✅ | |
 | 热切换 URL | ✅ | `switchUrl`，不销毁 pipeline |
 | 静音 / 音量 | ✅ | 0–100 |
@@ -119,6 +120,24 @@ CDN（如阿里云）在 RTMP 建连瞬间会把最近约 **2.5s 的历史视频
 
 修复后播放器侧积压 `pipe_backlog` 由 **~2550ms 降到 40–200ms**（`vdemux` / `vparse` 探针同量级），追平用时约 0.2–0.3s；该链路（阿里云 CDN）首帧 ≈0.9s，比不丢帧略晚（可接受）。日志证据：`catchup: START drop (lag=2361ms)` → `catchup: STOP (lag=199ms)` → `First frame post=1`。
 
+### 预连接毫秒级切流（1.0.15）
+
+`preconnect(url)`（hold 模式）把“RTMP 建连 + CDN 突发下发 + 突发积压消耗 + 首个关键帧软解（~300–500ms）”全部挪到点击**之前**的后台完成：
+
+- `preconnect()` 后台管线直达 PLAYING 并持续消费流，但**不向 Surface 出画、不发 FIRST_FRAME**（样本静默丢弃，追帧丢弃逻辑同期把落后消化到直播边缘）；
+- 同 URL 的 `start()` / `switchUrl()` 只需放行（hold=FALSE），下一个解码帧（贴直播边的新帧）即刻出画；
+- `preconnect()` 自身 ~200–400ms 返回，不阻塞调用线程；每个预连接占用一条 RTMP 连接 + 一个软解码器。
+
+实现依据（为什么不能“停在 PAUSED”）：playbin 的 `ASYNC→PAUSED` 可仅由**音频链**完成状态迁移——此时 video 分支（input-selector/appsink）尚未建立，decodebin 要等首个关键帧**解码完成**才 expose 视频口。因此预连接必须开到 PLAYING 让视频链在后台建完，`play()` 才拿得到现成帧。
+
+实测（小米 11，双实例 demo，两路阿里云 RTMP 720x1280 H.264 启动时各预热一路、切换时角色互换）：
+
+| 指标 | 结果 |
+|------|------|
+| 切换点击 → 新流首帧 | **avg 173 ms**（8 连切：37 / 172–228 ms） |
+| 启动首点（走预热） | 37–96 ms |
+| 未预热的普通切换（对照） | ~1000–1135 ms |
+
 ---
 
 ## 后台与生命周期（1.0.13）
@@ -166,7 +185,7 @@ CDN（如阿里云）在 RTMP 建连瞬间会把最近约 **2.5s 的历史视频
 
 1.0.4 与 1.0.3 体积持平，仅新增重复播放 ANR 修复的 `window_mutex` 锁代码（不足 1 MB，取整后无变化）。
 
-1.0.5–1.0.13 与 1.0.4 体积持平：期间均为 native 代码修复（rtmpsrc unlock 补丁、appsink `sync=FALSE` + 追帧丢弃、卡死看门狗）与 API 增补，未引入新链接库。
+1.0.5–1.0.15 与 1.0.4 体积持平：期间均为 native 代码修复（rtmpsrc unlock 补丁、appsink `sync=FALSE` + 追帧丢弃、卡死看门狗、RTMP 预连接 hold 模式）与 API 增补，未引入新链接库。
 
 裁剪手段：`CMakeLists.txt` 只链接核心库白名单 + 34 个插件白名单（whole-archive 仅插件）、strip、Bionic 缺失符号桩（`vk*` / `getgrgid_r` 等）、`ff_localize.map` 把 FFmpeg `ff_*` 符号本地化以满足 PIC 链接。链接完整性由 `LINKER:--no-undefined` 强制校验。
 
@@ -183,7 +202,7 @@ maven {
 // 或开发期本地: maven { url = uri("file:///E:/Android-SDK/maven-repo") }
 
 // android/app/build.gradle.kts
-implementation("com.latencyplayer:latencyplayer-sdk:1.0.13")
+implementation("com.latencyplayer:latencyplayer-sdk:1.0.15")
 ```
 
 发布（账密用 `-P` 传，不落库）：
@@ -201,7 +220,7 @@ rem 发到本机 ~/.m2
 gradlew :sdk:publishToMavenLocal
 ```
 
-版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.13`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
+版本号：`gradle.properties` 的 `LATENCYPLAYER_VERSION`（当前 `1.0.15`；Nexus `ALLOW_ONCE` 禁止同版本覆盖，升级需递增）。
 
 > 本机 `~/.gradle` 若配了全局代理，内网 Nexus 需 `systemProp.http.nonProxyHosts=192.168.*`（项目 `gradle.properties` 已配）。
 > 完整接入代码（Manifest / 布局 / MainActivity / 混淆）见 [doc/MAVEN_INTEGRATION.md](doc/MAVEN_INTEGRATION.md)。
