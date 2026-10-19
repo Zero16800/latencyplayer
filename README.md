@@ -298,4 +298,4 @@ E:\Android-SDK\
 
 ## 许可证
 
-Proprietary（闭源授权）。GStreamer 及其依赖的许可证见 `NDK-CMake-GStreamer` 内附带的 LICENSE 文件。
+Proprietary（闭源授权）。GStreamer 及其依赖的许可证见 `NDK-CMake-GStreamer` 内附带的 LICENSE 文件；注意为解码 AAC 链接的 `libgstlibav` 为 GPL-2.0（见 [doc/INTEGRATION.md](doc/INTEGRATION.md) 第 12 节）。
