@@ -1160,10 +1160,75 @@ static GstElement *build_explicit_pipeline(LatencyPlayerContext *ctx, const gcha
     return pipeline;
 }
 
+int latency_player_preconnect(LatencyPlayerContext *ctx, const char *uri) {
+    if (ctx == NULL || uri == NULL) return -1;
+
+    LOGI("Preconnect requested for URI: %s", uri);
+
+    g_mutex_lock(&ctx->mutex);
+
+    /* 已对同一URI预连接过：直接复用，不重建。 */
+    if (ctx->preconnected && ctx->uri != NULL &&
+        g_strcmp0(uri, ctx->uri) == 0 && ctx->pipeline != NULL) {
+        LOGI("Preconnect: already preconnected to %s, keep", uri);
+        g_mutex_unlock(&ctx->mutex);
+        return 0;
+    }
+
+    g_mutex_unlock(&ctx->mutex);
+
+    /* 若已预连接到不同URI：先拆掉旧的预连接管线。 */
+    if (ctx->preconnected) {
+        LOGI("Preconnect: switching target URI, tearing down old pipeline");
+        latency_player_stop(ctx);
+    }
+
+    ctx->preconnect_mode = TRUE;
+    int ret = latency_player_play(ctx, uri);
+    if (ret != 0) {
+        ctx->preconnect_mode = FALSE;
+        ctx->preconnected = FALSE;
+    }
+    return ret;
+}
+
 int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
     if (ctx == NULL || uri == NULL) return -1;
 
+    /* ⑫ RTMP预连接快速路径：preconnect() 已把管线建到 PAUSED（RTMP 握手
+     * 已完成），同 URI 的 play() 只需 PAUSED->PLAYING，省去建管线+建连。*/
+    if (ctx->preconnected && !ctx->preconnect_mode &&
+        ctx->uri != NULL && g_strcmp0(uri, ctx->uri) == 0) {
+        g_ft_t0_us = g_get_monotonic_time();
+        g_ft_src_buf_logged = FALSE;
+        g_ft_appsink_logged = FALSE;
+        g_ft_demux_logged = FALSE;
+        g_ft_parse_logged = FALSE;
+        g_ft_dec_out_logged = FALSE;
+        ft_log("nativePlay entry (preconnected)");
+        LOGI("Preconnect fast path: PAUSED->PLAYING for %s", uri);
+        g_mutex_lock(&ctx->mutex);
+        if (ctx->pipeline == NULL) {
+            ctx->preconnected = FALSE;
+            g_mutex_unlock(&ctx->mutex);
+            LOGI("Preconnect pipeline gone, falling back to full play");
+        } else {
+            gint64 t_fast0 = g_get_monotonic_time();
+            GstStateChangeReturn fast_ret =
+                gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
+            gint64 t_fast1 = g_get_monotonic_time();
+            ctx->preconnected = FALSE;
+            ctx->is_playing = TRUE;
+            g_mutex_unlock(&ctx->mutex);
+            LOGI("Preconnect fast path: set PLAYING ret=%d took %lld us",
+                 (int)fast_ret, (long long)(t_fast1 - t_fast0));
+            latency_player_send_message(ctx, GST_MSG_CONNECTED, 0, 0);
+            return 0;
+        }
+    }
+
     LOGI("Playing URI: %s", uri);
+    if (!ctx->preconnect_mode) ctx->preconnected = FALSE;
     g_ft_t0_us = g_get_monotonic_time();
     g_ft_src_buf_logged = FALSE;
     g_ft_appsink_logged = FALSE;
@@ -1416,6 +1481,33 @@ int latency_player_play(LatencyPlayerContext *ctx, const char *uri) {
         LOGI("appsink path: window bound via ctx->native_window");
     }
 
+    /* ⑫ 预连接模式：建管线 + RTMP 握手完成后停在 PAUSED，不进入 PLAYING。
+     * 后续同 URI 的 play() 走顶部快速路径，只做 PAUSED->PLAYING。 */
+    if (ctx->preconnect_mode) {
+        ctx->preconnect_mode = FALSE;
+        LOGI("PRECONNECT: setting pipeline PAUSED (window=%p)...", ctx->native_window);
+        GstStateChangeReturn pre_ret =
+            gst_element_set_state(ctx->pipeline, GST_STATE_PAUSED);
+        LOGI("PRECONNECT: set PAUSED ret=%d", (int)pre_ret);
+        if (pre_ret == GST_STATE_CHANGE_FAILURE) {
+            LOGE("PRECONNECT: failed to reach PAUSED, clearing preconnect");
+            gst_object_unref(ctx->pipeline);
+            ctx->pipeline = NULL;
+            ctx->preconnected = FALSE;
+            g_mutex_unlock(&ctx->mutex);
+            return -1;
+        }
+        ctx->preconnected = TRUE;
+        ctx->is_playing = FALSE;
+        gint64 t_pre_end = g_get_monotonic_time ();
+        LOGI("TIMING: preconnect took %" G_GINT64_FORMAT " us",
+             (t_pre_end - t_play_start));
+        latency_player_send_message(ctx, GST_MSG_CONNECTED, 0, 0);
+        g_mutex_unlock(&ctx->mutex);
+        LOGI("Preconnect done (pipeline PAUSED)");
+        return 0;
+    }
+
     // 设置为播放状态
     LOGI("Setting pipeline PLAYING...");
     GstStateChangeReturn ret = gst_element_set_state(ctx->pipeline, GST_STATE_PLAYING);
@@ -1456,6 +1548,9 @@ int latency_player_stop(LatencyPlayerContext *ctx) {
     LOGI("Stopping playback");
 
     g_mutex_lock(&ctx->mutex);
+
+    ctx->preconnected = FALSE;
+    ctx->preconnect_mode = FALSE;
 
     if (ctx->pipeline != NULL) {
         gst_element_set_state(ctx->pipeline, GST_STATE_NULL);

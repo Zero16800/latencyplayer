@@ -514,10 +514,29 @@ Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePlay(
 }
 
 /**
- * 鍋滄鎾斁
+ * RTMP预连接（建管线+握手，停在PAUSED；play同URI时秒开）
+ */
+JNIEXPORT void JNICALL
+Java_com_latencyplayer_sdk_LatencyPlayerManager_nativePreconnect(
+    JNIEnv *env, jobject thiz, jlong handle, jstring uri) {
+
+    LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;
+    if (ctx == NULL || uri == NULL) return;
+
+    const char *uri_str = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (uri_str == NULL) return;
+
+    latency_player_preconnect(ctx, uri_str);
+
+    (*env)->ReleaseStringUTFChars(env, uri, uri_str);
+}
+
+/**
+ * 鍋滄鎾斁
  */
 JNIEXPORT void JNICALL
 Java_com_latencyplayer_sdk_LatencyPlayerManager_nativeStop(
+
     JNIEnv *env, jobject thiz, jlong handle) {
 
     LatencyPlayerContext *ctx = (LatencyPlayerContext *)(intptr_t)handle;

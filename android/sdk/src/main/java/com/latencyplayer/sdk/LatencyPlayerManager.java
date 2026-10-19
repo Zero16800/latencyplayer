@@ -63,6 +63,7 @@ public class LatencyPlayerManager {
 
     /** 播放View */
     private LatencyPlayerView playerView;
+    private volatile Surface lastSurface;
 
     /** 重连管理器 */
     private ReconnectManager reconnectManager;
@@ -142,25 +143,18 @@ public class LatencyPlayerManager {
             @Override
             public void onSurfaceReady(Surface surface) {
                 Log.i(TAG, "onSurfaceReady: " + surface);
-                nativeSetSurface(nativeHandle, surface);
+                LatencyPlayerManager.this.onSurfaceReady(surface);
             }
 
             @Override
             public void onSurfaceChanged(int width, int height) {
-                Surface s = playerView != null && playerView.getSurfaceHolder() != null
-                        ? playerView.getSurfaceHolder().getSurface() : null;
-                if (s != null && s.isValid()) {
-                    Log.i(TAG, "onSurfaceChanged: rebind " + width + "x" + height);
-                    nativeSetSurface(nativeHandle, s);
-                }
+                LatencyPlayerManager.this.onSurfaceChanged(width, height);
             }
 
             @Override
             public void onSurfaceDestroyed() {
                 Log.i(TAG, "onSurfaceDestroyed");
-                if (nativeHandle != 0) {
-                    nativeSetSurface(nativeHandle, null);
-                }
+                LatencyPlayerManager.this.onSurfaceDestroyed();
             }
         });
 
@@ -168,7 +162,41 @@ public class LatencyPlayerManager {
         if (view.getSurfaceHolder() != null && view.getSurfaceHolder().getSurface() != null
                 && view.getSurfaceHolder().getSurface().isValid()) {
             Log.i(TAG, "Surface already ready, binding immediately");
-            nativeSetSurface(nativeHandle, view.getSurfaceHolder().getSurface());
+            onSurfaceReady(view.getSurfaceHolder().getSurface());
+        }
+    }
+
+    /**
+     * Surface 就绪（ SSC 视图创建/恢复后）。供多实例共用同一 SurfaceView 的场景
+     * 手动绑定（此时不要调用 setSurface(view)，它会独占视图回调）。
+     */
+    public void onSurfaceReady(@Nullable Surface surface) {
+        checkInitialized();
+        if (surface != null && surface.isValid()) {
+            lastSurface = surface;
+            nativeSetSurface(nativeHandle, surface);
+        }
+    }
+
+    /**
+     * Surface 尺寸变化：重新绑定。无视图绑定时用 lastSurface 兜底。
+     */
+    public void onSurfaceChanged(int width, int height) {
+        checkInitialized();
+        Surface s = playerView != null && playerView.getSurfaceHolder() != null
+                ? playerView.getSurfaceHolder().getSurface() : lastSurface;
+        if (nativeHandle != 0 && s != null && s.isValid()) {
+            Log.i(TAG, "onSurfaceChanged: rebind " + width + "x" + height);
+            nativeSetSurface(nativeHandle, s);
+        }
+    }
+
+    /**
+     * Surface 销毁：释放 native 侧窗口引用。
+     */
+    public void onSurfaceDestroyed() {
+        if (nativeHandle != 0) {
+            nativeSetSurface(nativeHandle, null);
         }
     }
 
@@ -206,6 +234,31 @@ public class LatencyPlayerManager {
         if (config.isAutoReconnect()) {
             reconnectManager.startMonitor();
         }
+    }
+
+    /**
+     * RTMP 预连接：提前建立管线并完成 RTMP 握手（不拉流、不出画）。
+     * 之后对同一 URL 调用 start()，只做 PAUSED->PLAYING，免去建管线和
+     * RTMP 握手（实测建连约 100~470ms）。若 URL 变化，自动重建。
+     *
+     * @param url 要预连接的播放地址（建议与即将 start() 的地址一致）
+     */
+    public void preconnect(@NonNull String url) {
+        checkInitialized();
+        if (url == null || url.isEmpty()) {
+            throw new IllegalStateException("URL not set, call setConfig() first");
+        }
+        Log.i(TAG, "Preconnecting: " + url);
+        config.setUrl(url);
+        final long handle = nativeHandle;
+        final String u = url;
+        controlExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (isReleased || handle == 0) return;
+                nativePreconnect(handle, u);
+            }
+        });
     }
 
     /**
@@ -572,8 +625,9 @@ public class LatencyPlayerManager {
     private native void nativeSetSurface(long handle, Surface surface);
 
     private native long nativeLastFrameAgeMs(long handle);
-
     private native void nativePlay(long handle, String uri);
+    private native void nativePreconnect(long handle, String uri);
+
 
     private native void nativeStop(long handle);
 

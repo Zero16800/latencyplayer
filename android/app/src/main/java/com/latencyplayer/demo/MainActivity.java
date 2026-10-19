@@ -33,13 +33,24 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "LatencyPlayerDemo";
 
+    // 阿里云流列表
+    private static final String[] STREAM_URLS = new String[]{
+            "rtmp://aliyunjp02.caiyunwang.net/xiaochou/141?auth_key=1782553361-0-0-a1c430ba36349758563f81bb0a126ce5",
+            "rtmp://aliyunjp02.caiyunwang.net/leisheng/174?auth_key=1782541771-0-0-d48d080ecff5e8df10a4b71bee134ae8"
+    };
+
     private EditText etUrl;
-    private Button btnPlay, btnStop, btnPause, btnMute, btnSnapshot;
+    private Button btnPlay, btnStop, btnPause, btnMute, btnSnapshot, btnPreconnect;
+    private Button btnStream1, btnStream2;
     private LatencyPlayerView playerView;
     private ImageView ivFreeze;
     private TextView tvStatus;
 
-    private LatencyPlayerManager playerManager;
+    private LatencyPlayerManager playerManager;   // ACTIVE：正在播的实例
+    private LatencyPlayerManager standbyPlayer;   // IDLE：后台预连接待切换流的实例
+    private String activeUrl;                     // ACTIVE 当前/最近一次的 URL
+    private String standbyUrl;                    // IDLE 预连接中的 URL
+    private LatencyPlayerCallback playerCallback; // 两个实例共用一套回调
     private boolean isMuted = false;
 
     // 冻结帧衔接：切换前抓最后一帧盖住画面，首帧到达后淡出，全程无黑屏
@@ -71,26 +82,148 @@ public class MainActivity extends AppCompatActivity {
         playerView = findViewById(R.id.player_view);
         ivFreeze = findViewById(R.id.iv_freeze);
         tvStatus = findViewById(R.id.tv_status);
+        btnPreconnect = findViewById(R.id.btn_preconnect);
 
         btnPlay.setOnClickListener(v -> startPlayback());
         btnStop.setOnClickListener(v -> stopPlayback());
         btnPause.setOnClickListener(v -> pauseResume());
         btnMute.setOnClickListener(v -> toggleMute());
         btnSnapshot.setOnClickListener(v -> takeSnapshot());
+        btnPreconnect.setOnClickListener(v -> doPreconnect());
+        btnStream1 = findViewById(R.id.btn_stream1);
+        btnStream2 = findViewById(R.id.btn_stream2);
+        btnStream1.setOnClickListener(v -> switchToStream(STREAM_URLS[0]));
+        btnStream2.setOnClickListener(v -> switchToStream(STREAM_URLS[1]));
+    }
+
+    private void doPreconnect() {
+        if (playerManager == null) {
+            Toast.makeText(this, "播放器未初始化", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String url = etUrl.getText().toString().trim();
+        if (url.isEmpty()) {
+            Toast.makeText(this, "请输入RTMP地址", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LatencyPlayerManager target = (standbyPlayer != null) ? standbyPlayer : playerManager;
+        target.preconnect(url);
+        updateStatus("预连接中...");
+    }
+
+    /** 平滑秒换：冻结当前最后一帧 → 停旧 → 预连接了目标流的实例秒起
+     *  → 新首帧淡入；空出来的实例去后台预连接刚离开的那条流 */
+    private void switchToStream(String url) {
+        Log.i(TAG, "TIMING switchToStream tap -> " + shortUrl(url)
+                + " t=" + android.os.SystemClock.elapsedRealtime());
+        if (playerManager == null) {
+            Toast.makeText(this, "播放器未初始化", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (startPending) return;
+        if (url.equals(activeUrl) && playerManager.isPlaying() && hasFirstFrame) {
+            updateStatus("正在播放该流");
+            return;
+        }
+        playTapT0 = android.os.SystemClock.elapsedRealtime();
+        etUrl.setText(url);
+
+        final LatencyPlayerManager oldM = playerManager;
+        // 优先选已预连接目标流的实例（待命位命中则角色互换，native 侧只做 PAUSED->PLAYING）
+        final boolean useStandby = standbyPlayer != null && url.equals(standbyUrl);
+        final boolean wasPlaying = oldM.isPlaying() && hasFirstFrame;
+        final long t0 = playTapT0;
+
+        Runnable doSwitch = () -> {
+            if (useStandby) {
+                oldM.stop();
+                playerManager = standbyPlayer;
+                standbyPlayer = oldM;
+                standbyUrl = null;
+            }
+            playerManager.getConfig().setUrl(url);
+            playerManager.start();
+            activeUrl = url;
+            Log.i(TAG, "TIMING switch start t="
+                    + (android.os.SystemClock.elapsedRealtime() - t0) + "ms after tap");
+            updateStatus("切换中...");
+            // 空出来的播放器去预连接另一条流，保证下次切换仍是秒开
+            String other = url.equals(STREAM_URLS[0]) ? STREAM_URLS[1] : STREAM_URLS[0];
+            if (standbyPlayer != null && !other.equals(standbyUrl)
+                    && url.equals(activeUrl)) {
+                standbyPlayer.preconnect(other);
+                standbyUrl = other;
+            }
+        };
+
+        if (wasPlaying) {
+            startPending = true;
+            captureLastFrame(bitmap -> {
+                if (!startPending) return; // 期间被停止/再次切换，放弃本次
+                if (bitmap != null) showFreeze(bitmap);
+                hasFirstFrame = false;
+                startPending = false;
+                doSwitch.run();
+            });
+        } else {
+            hasFirstFrame = false;
+            doSwitch.run();
+        }
     }
 
     private void initPlayer() {
         try {
-            playerManager = new LatencyPlayerManager();
-            playerManager.init(getApplicationContext());
+            playerCallback = createCallback();
+            playerManager = createPlayer();
+            standbyPlayer = createPlayer();
         } catch (Throwable t) {
             Log.e(TAG, "Player init failed", t);
             updateStatus("初始化失败: " + t.getMessage());
             playerManager = null;
+            standbyPlayer = null;
             return;
         }
 
-        // 配置播放器
+        // SurfaceView 事件广播给两个播放器实例（视图只允许挂一个监听，
+        // 两个实例各自 ANativeWindow_fromSurface 持有同一 Surface 引用）
+        playerView.setOnSurfaceReadyListener(new LatencyPlayerView.OnSurfaceReadyListener() {
+            @Override
+            public void onSurfaceReady(android.view.Surface surface) {
+                if (playerManager != null) playerManager.onSurfaceReady(surface);
+                if (standbyPlayer != null) standbyPlayer.onSurfaceReady(surface);
+            }
+
+            @Override
+            public void onSurfaceChanged(int width, int height) {
+                if (playerManager != null) playerManager.onSurfaceChanged(width, height);
+                if (standbyPlayer != null) standbyPlayer.onSurfaceChanged(width, height);
+            }
+
+            @Override
+            public void onSurfaceDestroyed() {
+                if (playerManager != null) playerManager.onSurfaceDestroyed();
+                if (standbyPlayer != null) standbyPlayer.onSurfaceDestroyed();
+            }
+        });
+
+        // 兜底：表面可能已创建而监听刚挂上，手动补一次绑定
+        android.view.Surface existed = playerView.getHolder().getSurface();
+        if (existed != null && existed.isValid()) {
+            playerManager.onSurfaceReady(existed);
+            standbyPlayer.onSurfaceReady(existed);
+        }
+
+        // 启动即各自预连接一条流：之后不管点哪条都是秒开
+        playerManager.preconnect(STREAM_URLS[0]);
+        standbyPlayer.preconnect(STREAM_URLS[1]);
+
+        updateStatus("已初始化（双流预连接中）");
+    }
+
+    private LatencyPlayerManager createPlayer() {
+        LatencyPlayerManager manager = new LatencyPlayerManager();
+        manager.init(getApplicationContext());
+
         LatencyPlayerConfig config = LatencyPlayerConfig.builder()
                 .url(etUrl.getText().toString().trim())
                 .bufferTime(0)
@@ -102,13 +235,13 @@ public class MainActivity extends AppCompatActivity {
                 .maxReconnectCount(0) // 无限重连
                 .build();
 
-        playerManager.setConfig(config);
+        manager.setConfig(config);
+        manager.setCallback(playerCallback);
+        return manager;
+    }
 
-        // 设置播放View
-        playerManager.setSurface(playerView);
-
-        // 设置回调
-        playerManager.setCallback(new LatencyPlayerCallback() {
+    private LatencyPlayerCallback createCallback() {
+        return new LatencyPlayerCallback() {
             @Override
             public void onStateChanged(LatencyPlayerState state) {
                 Log.d(TAG, "State changed: " + state);
@@ -174,9 +307,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPlaybackCompleted() {
                 updateStatus("播放完成");
             }
-        });
-
-        updateStatus("已初始化");
+        };
     }
 
     private void startPlayback() {
@@ -221,6 +352,9 @@ public class MainActivity extends AppCompatActivity {
         if (playerManager == null) return;
         startPending = false; // 取消还在等待抓帧的切换
         playerManager.stop();
+        if (standbyPlayer != null) standbyPlayer.stop();
+        activeUrl = null;
+        standbyUrl = null;
         hideFreezeNow();
         updateStatus("已停止");
     }
@@ -283,6 +417,7 @@ public class MainActivity extends AppCompatActivity {
         if (playerManager == null) return;
         isMuted = !isMuted;
         playerManager.setMute(isMuted);
+        if (standbyPlayer != null) standbyPlayer.setMute(isMuted);
         btnMute.setText(isMuted ? "取消静音" : "静音");
     }
 
@@ -309,6 +444,13 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> tvStatus.setText(status));
     }
 
+    private String shortUrl(String url) {
+        int q = url.indexOf('?');
+        if (q > 0) url = url.substring(0, q);
+        String[] seg = url.split("/");
+        return seg.length >= 2 ? seg[seg.length - 2] + "/" + seg[seg.length - 1] : url;
+    }
+
     private String formatSpeed(long bytesPerSec) {
         if (bytesPerSec < 1024) {
             return bytesPerSec + " B/s";
@@ -326,6 +468,12 @@ public class MainActivity extends AppCompatActivity {
         if (playerManager != null) {
             try {
                 playerManager.release();
+            } catch (Throwable ignored) {
+            }
+        }
+        if (standbyPlayer != null) {
+            try {
+                standbyPlayer.release();
             } catch (Throwable ignored) {
             }
         }

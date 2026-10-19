@@ -25,6 +25,47 @@
         android:layout_width="match_parent"
         android:layout_height="16dp" />
 
+    <!-- 预连接按钮 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_preconnect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="预连接 (RTMP 握手提前)"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="8dp" />
+
+    <!-- 流列表：点一下平滑切换到对应阿里云流 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_stream1"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="流1 小丑141"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_stream2"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="流2 雷声174"
+            android:layout_marginStart="8dp" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="8dp" />
+
     <!-- 控制按钮 -->
     <LinearLayout
         android:layout_width="match_parent"

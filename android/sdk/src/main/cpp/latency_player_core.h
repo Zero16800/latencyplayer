@@ -156,6 +156,13 @@ typedef struct LatencyPlayerContext {
     /** 是否已发送首帧 */
     gboolean first_frame_sent;
 
+    /** RTMP 预连接：管线已建好并停在 PAUSED（RTMP 握手已完成），
+     *  play() 只需 PAUSED->PLAYING 即可出画 */
+    gboolean preconnected;
+
+    /** 预连接模式（play() 内部用）：建好后停在 PAUSED 而非 PLAYING */
+    gboolean preconnect_mode;
+
     /** E2E 滞后测量：本次播放首帧渲染时的 PTS(ms) 与单调墙钟(us)，-1=未记录 */
     gint64 lag_ref_pts_ms;
     gint64 lag_ref_wall_us;
@@ -213,6 +220,12 @@ int latency_player_init(LatencyPlayerContext *ctx, JavaVM *java_vm, jobject java
  * 设置播放URI并开始播放
  */
 int latency_player_play(LatencyPlayerContext *ctx, const char *uri);
+
+/**
+ * RTMP预连接：提前建管线并完成RTMP握手（停在PAUSED），
+ * 之后的 play(相同URI) 只需 PAUSED->PLAYING 即可出画
+ */
+int latency_player_preconnect(LatencyPlayerContext *ctx, const char *uri);
 
 /**
  * 停止播放
