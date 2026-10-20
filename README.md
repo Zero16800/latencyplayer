@@ -2,6 +2,10 @@
 
 > English docs: [README.en.md](README.en.md)。
 
+
+![Uploading image.png…]()
+
+
 堪比大牛SDK的Android 直播播放器 SDK。
 主路径：**RTMP 拉流 → 软/硬解 → appsink 直绘 `ANativeWindow`**（绕过 EGL，模拟器也稳定）。
 
