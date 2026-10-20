@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LatencyPlayer 鈥?姣绾?RTMP 鐩存挱鎾斁 SDK锛圓ndroid/iOS锛?/title>
-<meta name="description" content="鍩轰簬 GStreamer 闈欐€佸簱鐨?Android 鐩存挱鎾斁鍣?SDK锛氶杩炴帴 hold 妯″紡姣绾у垏娴侊紝绋虫€佸欢杩?~100ms锛宎ppsink 鐩寸粯涓嶄緷璧?EGL锛孉AR 浠?59.6MB銆?>
+<title>LatencyPlayer — 毫秒级 RTMP 直播播放 SDK（Android/iOS）</title>
+<meta name="description" content="基于 GStreamer 静态库的 Android 直播播放器 SDK：预连接 hold 模式毫秒级切流，稳态延迟 ~100ms，appsink 直绘不依赖 EGL，AAR 仅 59.6MB。">
 <style>
   :root{
     --bg:#0a0e14; --bg2:#0f1420; --card:#121926; --card2:#0d1320;
@@ -166,35 +166,35 @@
 
 <nav>
   <div class="nav-in">
-    <a class="logo" href="#top"><span class="mark">鈻?/span>LatencyPlayer</a>
+    <a class="logo" href="#top"><span class="mark">▶</span>LatencyPlayer</a>
     <span class="ver-pill">v1.0.15</span>
     <div class="links">
-      <a href="#features">鍔熻兘</a>
-      <a href="#latency">寤惰繜</a>
-      <a href="#how-it-works">鏋舵瀯</a>
-      <a href="#code">浠ｇ爜</a>
-      <a href="#support">鏀寔</a>
-      <a href="#docs">鏂囨。</a>
-      <a class="gh-btn" href="https://github.com/Zero16800/latencyplayer">GitHub 鈫?/a>
+      <a href="#features">功能</a>
+      <a href="#latency">延迟</a>
+      <a href="#how-it-works">架构</a>
+      <a href="#code">代码</a>
+      <a href="#support">支持</a>
+      <a href="#docs">文档</a>
+      <a class="gh-btn" href="https://github.com/Zero16800/latencyplayer">GitHub ↗</a>
     </div>
   </div>
 </nav>
 
 <header class="hero" id="top">
   <div class="wrap">
-    <div class="badge"><span class="dot"></span>v1.0.15 路  hold 妯″紡棰勮繛鎺?路 鐪熸満瀹炴祴</div>
-    <h1>鐩存挱娴佸垏鎹紝<span class="g">姣绾?/span>銆?br>鎾斁鍣?SDK锛屽氨璇ヨ繖涔堝揩銆?/h1>
-    <p class="sub">鍩轰簬 GStreamer 闈欐€佸簱鏋勫缓鐨?Android / iOS 鐩存挱鎾斁鍣ㄣ€俁TMP 鈫?瑙ｇ爜 鈫?appsink 鐩寸粯
-      ANativeWindow锛岄杩炴帴 hold 妯″紡鎶婂缓閾俱€佺獊鍙戠Н鍘嬨€侀甯цВ鐮佸叏閮ㄦ尓鍒扮偣鍑讳箣鍓嶁€斺€斿垏鎹㈢偣涓嬬殑閭ｄ竴鍒伙紝鐢婚潰宸茬粡鍦ㄧ瓑鎮ㄦ寜涓嬨€?/p>
+    <div class="badge"><span class="dot"></span>v1.0.15 · hold 模式预连接 · 真机实测</div>
+    <h1>直播流切换，<span class="g">毫秒级</span>。<br>播放器 SDK，就该这么快。</h1>
+    <p class="sub">基于 GStreamer 静态库构建的 Android / iOS 直播播放器。RTMP → 解码 → appsink 直绘
+      ANativeWindow，预连接 hold 模式把建链、突发积压、首帧解码全部挪到点击之前——点下的那一刻，画面已在等你。</p>
     <div class="cta">
-      <a class="btn primary" href="#code">浜斿垎閽熸帴鍏?/a>
-      <a class="btn ghost" href="https://github.com/Zero16800/latencyplayer">GitHub 婧愮爜浠撳簱</a>
+      <a class="btn primary" href="#code">五分钟接入</a>
+      <a class="btn ghost" href="https://github.com/Zero16800/latencyplayer">GitHub 源码仓库</a>
     </div>
     <div class="stats">
-      <div class="stat"><div class="n">173ms</div><div class="l">鍒囨崲鐐瑰嚮 鈫?鏂版祦棣栧抚锛坅vg锛岀湡鏈?8 杩炲垏锛?/div></div>
-      <div class="stat"><div class="n">~100ms</div><div class="l">绋虫€佺敾闈㈠欢杩燂紙鐩稿 PC 鍙傝€冮摼璺級</div></div>
-      <div class="stat"><div class="n">59.6MB</div><div class="l">AAR 鍏ㄩ噺 路 4 ABI 路 鎻掍欢鐧藉悕鍗曡鍓?/div></div>
-      <div class="stat"><div class="n">API 21+</div><div class="l">Android 5.0 璧?路 16KB 椤靛凡鏀寔</div></div>
+      <div class="stat"><div class="n">173ms</div><div class="l">切换点击 → 新流首帧（avg，真机 8 连切）</div></div>
+      <div class="stat"><div class="n">~100ms</div><div class="l">稳态画面延迟（相对 PC 参考链路）</div></div>
+      <div class="stat"><div class="n">59.6MB</div><div class="l">AAR 全量 · 4 ABI · 插件白名单裁剪</div></div>
+      <div class="stat"><div class="n">API 21+</div><div class="l">Android 5.0 起 · 16KB 页已支持</div></div>
     </div>
   </div>
 </header>
@@ -203,19 +203,19 @@
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Features</div>
-      <h2>涓虹洿鎾€岀敓鐨勮兘鍔涢泦</h2>
-      <p>涓嶆槸浠?VOD 鎾斁鍣ㄤ笂缂濊ˉ鐨勭洿鎾姛鑳斤紝鑰屾槸浠?RTMP 閾捐矾銆佽В鐮併€佹覆鏌撴瘡涓€灞傞兘鎸夈€屼綆寤惰繜銆侀珮鍙敤銆嶉噸鏂拌璁°€?/p>
+      <h2>为直播而生的能力集</h2>
+      <p>不是从 VOD 播放器上缝补的直播功能，而是从 RTMP 链路、解码、渲染每一层都按「低延迟、高可用」重新设计。</p>
     </div>
     <div class="grid">
-      <div class="feat"><div class="ic">鈿?/div><h3>棰勮繛鎺ユ绉掔骇鍒囨祦</h3><p><code>preconnect(url)</code> hold 妯″紡锛氬缓杩炪€丆DN 绐佸彂鐏屽叆銆佺獊鍙戠Н鍘嬫秷鑰椼€佺涓€涓叧閿抚杞В鍏ㄩ儴鍚庡彴瀹屾垚锛屽悓 URL 鎾斁鐩存帴鍑虹敾銆?/p></div>
-      <div class="feat"><div class="ic">馃幆</div><h3>鏋侀檺浣庡欢杩?/h3><p><code>bufferTime(0)</code> + 闃熷垪椋庢墖鍖栵紙queue2 50ms / multiqueue 8 缂撳啿锛夛紝绋虫€佸欢杩熸暟鎹疄娴嬩腑浣?~125ms锛岃€岄潪銆屽弬鏁颁笂鏀寔銆嶃€?/p></div>
-      <div class="feat"><div class="ic">馃攧</div><h3>杩藉抚涓㈠純 路 鎶楃Н鍘?/h3><p>CDN 寮€鎾竴娆′笅鍙?~2.5s 鍘嗗彶锛歛ppsink <code>sync=FALSE</code> + 鎸夈€岀洿鎾竟缂?鈭?甯?PTS銆嶈拷甯э紝鍙烦甯т笉娓叉煋鏃у抚锛?.3s 鍐呰创鍥炵洿鎾竟銆?/p></div>
-      <div class="feat"><div class="ic">馃洝</div><h3>鍚庡彴鑷仮澶嶇湅闂ㄧ嫍</h3><p>杩涚▼琚郴缁?MIUI 鍐荤粨鍚庣绾库€滃亣娲烩€濓細閫愮妫€鏌ユ渶杩戝抚骞撮緞锛?3s 鏃犳柊甯у己鍒堕噸杩烇紝杩斿洖鍓嶅彴 ~750ms 鍐呮仮澶嶅嚭鐢汇€?/p></div>
-      <div class="feat"><div class="ic">馃攲</div><h3>涓嶄緷璧?EGL 鐨勭洿缁?/h3><p>RGBx/RGBA 鈫?<code>ANativeWindow</code> appsink 鐩寸粯锛岀粫寮€ glimagesink 鍦ㄦā鎷熷櫒/閿佸畾璁惧涓婄殑鍏煎鍧戯紝绋冲畾鍙祴銆?/p></div>
-      <div class="feat"><div class="ic">馃摗</div><h3>鏂嚎鑷姩閲嶈繛</h3><p>闂撮殧銆佹鏁板彲閰嶏紝<code>maxReconnectCount(0)</code> 鏃犻檺娆★紱URL 鐑垏鎹?<code>switchUrl</code> 涓嶉攢姣?pipeline銆?/p></div>
-      <div class="feat"><div class="ic">馃帥</div><h3>杞В/纭В鍙垏鎹?/h3><p>openh264 杞В涓洪粯璁ゅ彲棰勬湡璺緞锛孧ediaCodec 纭В璺緞鍙寜鏈哄瀷鍚敤锛汬.264/H.265 瑙嗚澶囥€丮P3/AAC/Audio 鍏ㄨ鐩栥€?/p></div>
-      <div class="feat"><div class="ic">馃摳</div><h3>鎴浘 / 甯у勾榫?/ 鍥炶皟榻愬叏</h3><p><code>saveSnapshot</code> PNG/JPEG銆?code>getLastFrameAgeMs</code>銆侀甯т笌瑙嗛灏哄涓荤嚎绋嬪洖璋冦€?code>onDownloadSpeed</code>銆?/p></div>
-      <div class="feat"><div class="ic">馃摝</div><h3>浣撶Н璁ょ湡鍋氳繃</h3><p>34 鎻掍欢鐧藉悕鍗曢摼鎺?+ strip + FFT/FFmpeg 绗﹀彿鏈湴鍖栵紝AAR 59.6MB 鍏?ABI锛學in/Linux 浜ゅ弶缂栬瘧鍧囧彲澶嶇幇銆?/p></div>
+      <div class="feat"><div class="ic">⚡</div><h3>预连接毫秒级切流</h3><p><code>preconnect(url)</code> hold 模式：建连、CDN 突发灌入、突发积压消耗、第一个关键帧软解全部后台完成，同 URL 播放直接出画。</p></div>
+      <div class="feat"><div class="ic">🎯</div><h3>极限低延迟</h3><p><code>bufferTime(0)</code> + 内部队列扁平化（queue2 50ms / multiqueue 8 缓冲），稳态延迟数据实测中位 ~125ms，而非「参数上支持」。</p></div>
+      <div class="feat"><div class="ic">🔄</div><h3>追帧丢弃 · 抗积压</h3><p>CDN 开播一次下发 ~2.5s 历史：appsink <code>sync=FALSE</code> + 按「直播边缘 − 帧 PTS」追帧，只跳帧不渲染旧帧，0.3s 内贴回直播边。</p></div>
+      <div class="feat"><div class="ic">🛡</div><h3>后台自恢复看门狗</h3><p>进程被系统/MIUI 冻结后管线“假活”：逐秒检查最近帧年龄，&gt;3s 无新帧强制重连，返回前台 ~750ms 内恢复出画。</p></div>
+      <div class="feat"><div class="ic">🔌</div><h3>不依赖 EGL 的直绘</h3><p>RGBx/RGBA → <code>ANativeWindow</code> appsink 直绘，绕开 glimagesink 在模拟器/锁定设备上的兼容坑，稳定可测。</p></div>
+      <div class="feat"><div class="ic">📡</div><h3>断线自动重连</h3><p>间隔、次数可配，<code>maxReconnectCount(0)</code> 无限次；URL 热切换 <code>switchUrl</code> 不销毁 pipeline。</p></div>
+      <div class="feat"><div class="ic">🎛</div><h3>软解/硬解可切换</h3><p>openh264 软解为默认可预期路径，MediaCodec 硬解路径可按机型启用；H.264 主播级覆盖，AAC/MP3 等音频全支持。</p></div>
+      <div class="feat"><div class="ic">📸</div><h3>截图 / 帧年龄 / 回调齐全</h3><p><code>saveSnapshot</code> PNG/JPEG、<code>getLastFrameAgeMs</code>、首帧与视频尺寸主线程回调、<code>onDownloadSpeed</code>。</p></div>
+      <div class="feat"><div class="ic">📦</div><h3>体积认真做过</h3><p>34 插件白名单链接 + strip + FFmpeg 符号本地化，AAR 59.6MB 全 ABI，链接期由 <code>--no-undefined</code> 强制校验。</p></div>
     </div>
   </div>
 </section>
@@ -224,32 +224,34 @@
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Benchmark</div>
-      <h2>鏁板瓧锛屼笉鏄舰瀹硅瘝</h2>
-      <p>灏忕背 11 / arm64-v8a / Android 14 路 婧愭祦 720脳1280 H.264 RTMP 路 鍙屽疄渚?demo 路 闃块噷浜?RTMP 鍙岃矾</p>
+      <h2>数字，不是形容词</h2>
+      <p>小米 11 / arm64-v8a / Android 14 · 源流 720×1280 H.264 RTMP · 双实例 demo · 阿里云 RTMP 双路</p>
     </div>
     <div class="bench">
       <div class="bar-row">
-        <div class="name">鍒囨崲鐐瑰嚮 鈫?鏂版祦棣栧抚<br><span class="muted" style="font-size:11px">棰勮繛鎺ワ紙8 杩炲垏 avg锛?/span></div>
+        <div class="name">切换点击 → 新流首帧<br><span class="muted" style="font-size:11px">预连接（8 连切 avg）</span></div>
         <div class="bar-track"><div class="bar best" data-w="16" style="width:0"></div></div>
         <div class="val">173 ms</div>
       </div>
       <div class="bar-row">
-        <div class="name">鍚姩棣栫偣锛堣蛋棰勭儹锛?/div>
+        <div class="name">启动首点（走预热）</div>
         <div class="bar-track"><div class="bar best" data-w="8" style="width:0"></div></div>
-        <div class="val">37鈥?6 ms</div>
+        <div class="val">37–96 ms</div>
       </div>
       <div class="bar-row">
-        <div class="name">鏅€氬喎鍚姩棣栧抚锛堟湭棰勮繛鎺ワ級</div>
+        <div class="name">普通冷启动首帧（未预连接）</div>
         <div class="bar-track"><div class="bar mid" data-w="46" style="width:0"></div></div>
         <div class="val">avg 491 ms</div>
       </div>
       <div class="bar-row">
-        <div class="name">鏈鐑櫘閫氭祦鍒囨崲</div>
+        <div class="name">未预热普通流切换</div>
         <div class="bar-track"><div class="bar bad" data-w="100" style="width:0"></div></div>
-        <div class="val">~1000鈥?135 ms</div>
+        <div class="val">~1000–1135 ms</div>
       </div>
       <div class="note">
-        <b>绋虫€佺敾闈㈠欢杩?/b>锛?3鈥?74ms锛屼腑浣?~125ms锛?6 娆℃湁鏁堥噰鏍凤級鈥斺€擯C 绔?<code>ffmpeg -nobuffer</code> 鍙傝€冮摼 + 璁惧渚?raw 鎴浘 SAD 閫愬抚鍐呭鍖归厤锛岄潪鑷姤鏃跺欢銆?        <br><b>娴嬭瘯灞€闄?/b>锛氳澶囧繀椤诲父浜紙鎭睆 Dozing 鏃?Surface 鍋滄娓叉煋浼氭祴涓嶄笅鍘伙級锛涚鍒扮鍓╀綑閮ㄥ垎鍙栧喅浜庢湇鍔＄鎺ㄦ祦鑺傚涓庣綉缁溿€?      </div>
+        <b>稳态画面延迟</b>：53–174ms，中位 ~125ms（16 次有效采样）——PC 端 <code>ffmpeg -nobuffer</code> 参考链 + 设备侧 raw 截图 SAD 逐帧内容匹配，非自报时延。
+        <br><b>测试局限</b>：设备必须常亮（息屏 Dozing 时 Surface 停止渲染会测不下去）；端到端剩余部分取决于服务端推流节奏与网络。
+      </div>
     </div>
   </div>
 </section>
@@ -258,25 +260,25 @@
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Architecture</div>
-      <h2>hold 妯″紡锛氭妸绛夊緟閮藉仛鍦ㄧ偣鍑讳箣鍓?/h2>
-      <p>甯歌鎾斁鍣ㄥ垏娴佹參锛屾槸鍥犱负寤洪摼銆丆DN 绐佸彂銆侀甯цВ鐮佸叏鍦ㄧ偣鍑汇€屼箣鍚庛€嶄覆琛屽彂鐢熴€侺atencyPlayer 鐨?preconnect 鎶婅繖涓€鍒囨惉杩涘悗鍙帮紝骞跺湪瑙嗛閾剧湡姝ｅ彲鐢ㄦ椂鎵嶆斁琛屻€?/p>
+      <h2>hold 模式：把等待都做在点击之前</h2>
+      <p>常规播放器切流慢，是因为建链、CDN 突发、首帧解码全在点击「之后」串行发生。LatencyPlayer 的 preconnect 把这一切搬进后台，并在视频链真正可用时才放行。</p>
     </div>
     <div class="flow">
       <ol>
-        <li><b>preconnect(url) 绔嬪嵆杩斿洖</b><span>~200鈥?00ms 杩斿洖锛屼笉闃诲璋冪敤绾跨▼锛涘悗鍙板崰鐢ㄤ竴鏉?RTMP 杩炴帴 + 涓€涓蒋瑙ｇ爜鍣ㄣ€?/span></li>
-        <li><b>鍚庡彴鐩磋揪 PLAYING 鎸佺画鍙栨祦</b><span>RTMP 寤鸿繛 鈫?CDN 绐佸彂涓€娆′笅鍙?~2.5s 鍘嗗彶 鈫?杩藉抚涓㈠純娑堝寲绉帇 鈫?棣栦釜鍏抽敭甯ц蒋瑙ｅ畬鎴愩€乸laybin 瑙嗛閾惧缓绔嬨€?/span></li>
-        <li><b>hold 鏍锋湰闈欓粯涓㈠純</b><span>涓嶅悜 Surface 鍑虹敾銆佷笉瑙﹀彂 FIRST_FRAME锛屼笟鍔″眰瀹屽叏鏃犳劅鐭ャ€?/span></li>
-        <li><b>play() 鍙渶銆屾斁琛屻€?/b><span>鍚?URL 鐩存帴 hold=FALSE锛屼笅涓€甯цВ鐮佸畬鎴愬嵆鍑虹敾鈥斺€旇创鐩存挱杈圭紭鐨勬柊甯э紝鑰屼笉鏄巻鍙插抚銆?/span></li>
+        <li><b>preconnect(url) 立即返回</b><span>~200–400ms 返回，不阻塞调用线程；后台占用一条 RTMP 连接 + 一个软解码器。</span></li>
+        <li><b>后台直达 PLAYING 持续取流</b><span>RTMP 建连 → CDN 突发一次下发 ~2.5s 历史 → 追帧丢弃消化积压 → 首个关键帧软解完成、playbin 视频链建立。</span></li>
+        <li><b>hold 样本静默丢弃</b><span>不向 Surface 出画、不触发 FIRST_FRAME，业务层完全无感知。</span></li>
+        <li><b>play() 只需「放行」</b><span>同 URL 直接 hold=FALSE，下一帧解码完成即出画——贴直播边缘的新帧，而不是历史帧。</span></li>
       </ol>
       <div class="diagram">
-<span class="hl2">鏅€氭挱鏀惧櫒鍒囨祦锛堜覆琛岋級</span>
-tap 鈹€鈻?杩炴帴 鈹€鈻?CDN 2.5s 鐏屽叆
-      鈹€鈻?棣栧抚杞В 鈹€鈻?鍑虹敾
+<span class="hl2">普通播放器切流（串行）</span>
+tap ─▶ 连接 ─▶ CDN 2.5s 灌入
+      ─▶ 首帧软解 ─▶ 出画
           ~1000ms+
-<span class="hl">LatencyPlayer锛堥杩炴帴锛?/span>
-t0  鈹€鈻?preconnect(url)
-     鈹€鈻?[鍚庡彴: 寤洪摼+绉帇+棣栧抚瑙ｇ爜]
-tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
+<span class="hl">LatencyPlayer（预连接）</span>
+t0  ─▶ preconnect(url)
+     ─▶ [后台: 建链+积压+首帧解码]
+tap ─▶ 放行 hold ─▶ 出画
           ~<span class="hl">173ms avg</span></div>
     </div>
   </div>
@@ -286,15 +288,15 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Integration</div>
-      <h2>浜斿垎閽燂紝浜斿垎閽熺湡鐨勫</h2>
+      <h2>五分钟，真的够</h2>
     </div>
     <div class="codewrap">
       <div class="tabs" id="tabs">
-        <button class="on" data-t="0">蹇€熸帴鍏?/button>
-        <button data-t="1">浣庡欢杩熼厤缃?/button>
-        <button data-t="2">棰勮繛鎺?/button>
-        <button data-t="3">鍥炶皟</button>
-        <button data-t="4">浜嬩欢涓庨噸杩?/button>
+        <button class="on" data-t="0">快速接入</button>
+        <button data-t="1">低延迟配置</button>
+        <button data-t="2">预连接</button>
+        <button data-t="3">回调</button>
+        <button data-t="4">事件与重连</button>
       </div>
       <pre class="code" id="pane">...</pre>
     </div>
@@ -305,25 +307,25 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Support Matrix</div>
-      <h2>鍗忚涓庤澶囨敮鎸?/h2>
+      <h2>协议与设备支持</h2>
     </div>
     <table class="tbl">
-      <tr><th>鍗忚</th><th>鏀寔</th><th>璇存槑</th></tr>
-      <tr><td>RTMP / RTMPS</td><td class="ok">鉁?涓昏矾寰?/td><td>librtmp 鎷夋祦锛孋DN 绐佸彂绉帇鍐呯疆澶勭悊锛屽仠/鍒囨崲璇荤嚎绋嬬珵鎬佷慨澶嶏紝鐪熸満鍘嬫祴 0 宕╂簝</td></tr>
-      <tr><td>RTSP / RTSPS</td><td class="ok">鉁?/td><td>rtspsrc + RTP/SDP锛宭atency 80/200ms锛屽洖褰掗€氳繃</td></tr>
-      <tr><td>HTTP-FLV</td><td class="ok">鉁?/td><td>souphttpsrc锛坱imeout 10s锛夛紝鍥炲綊閫氳繃</td></tr>
-      <tr><td>HLS</td><td class="ok">鉁?/td><td>鐐规挱 + 鐩存挱锛坒MP4 澶?variant锛夊洖褰掗€氳繃</td></tr>
-      <tr><td>WebRTC</td><td class="no">鉂?/td><td>涓嶆敮鎸?/td></tr>
+      <tr><th>协议</th><th>支持</th><th>说明</th></tr>
+      <tr><td>RTMP / RTMPS</td><td class="ok">✅ 主路径</td><td>librtmp 拉流，CDN 突发积压内置处理，停/切换读线程竞态修复，真机压测 0 崩溃</td></tr>
+      <tr><td>RTSP / RTSPS</td><td class="ok">✅</td><td>rtspsrc + RTP/SDP，latency 80/200ms，回归通过</td></tr>
+      <tr><td>HTTP-FLV</td><td class="ok">✅</td><td>souphttpsrc（timeout 10s），回归通过</td></tr>
+      <tr><td>HLS</td><td class="ok">✅</td><td>点播 + 直播（fMP4 多 variant）回归通过</td></tr>
+      <tr><td>WebRTC</td><td class="no">❌</td><td>不支持</td></tr>
     </table>
     <div style="height:16px"></div>
     <table class="tbl">
-      <tr><th>璁惧</th><th>鏀寔鑼冨洿</th></tr>
-      <tr><td>鏈€浣庣郴缁?/td><td>Android 5.0锛圓PI 21锛壜?鐩爣 API 34 路 宸插疄娴嬪皬绫?11锛坅rm64 / Android 14锛?/td></tr>
-      <tr><td>ABI</td><td>arm64-v8a / armeabi-v7a / x86 / x86_64 鍏ㄩ噺</td></tr>
-      <tr><td>16KB 椤?/td><td class="ok">鉁?64 浣?so 0x4000 瀵归綈锛寊ipalign -P 16 閫氳繃锛圓ndroid 15+ 鍏煎锛?/td></tr>
-      <tr><td>鎶樺彔灞?/ 妯珫灞?/td><td class="ok">鉁?Surface 灏哄鍙樺寲鑷姩閲嶇粦锛宑onfigChanges 鍐呭垏灞忎笉鏂祦</td></tr>
-      <tr><td>妯℃嫙鍣?/td><td class="ok">鉁?x86_64 鍙敤锛坅ppsink 鐩寸粯瑙勯伩 glimagesink 鍏煎闂锛?/td></tr>
-      <tr><td>iOS</td><td class="warn">棣栫増鑴氭墜鏋?/td><td>librtmp + VideoToolbox + AVSampleBufferDisplayLayer锛岃棰戦摼璺凡瀹炵幇锛岄煶棰戝緟瀹炵幇</td></tr>
+      <tr><th>设备</th><th>支持范围</th></tr>
+      <tr><td>最低系统</td><td>Android 5.0（API 21）· 目标 API 34 · 已实测小米 11（arm64 / Android 14）</td></tr>
+      <tr><td>ABI</td><td>arm64-v8a / armeabi-v7a / x86 / x86_64 全量</td></tr>
+      <tr><td>16KB 页</td><td class="ok">✅ 64 位 so 0x4000 对齐，zipalign -P 16 通过（Android 15+ 兼容）</td></tr>
+      <tr><td>折叠屏 / 横竖屏</td><td class="ok">✅ Surface 尺寸变化自动重绑，configChanges 内切屏不断流</td></tr>
+      <tr><td>模拟器</td><td class="ok">✅ x86_64 可用（appsink 直绘规避 glimagesink 兼容问题）</td></tr>
+      <tr><td>iOS</td><td class="warn">首版脚手架</td><td>librtmp + VideoToolbox + AVSampleBufferDisplayLayer，视频链路已实现，音频待实现</td></tr>
     </table>
   </div>
 </section>
@@ -332,15 +334,15 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
   <div class="wrap">
     <div class="sec-head">
       <div class="tag">Documentation</div>
-      <h2>鏂囨。绱㈠紩</h2>
+      <h2>文档索引</h2>
     </div>
     <div class="docs-grid">
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/master/doc/USAGE.md"><b>USAGE</b><span>蹇€熸帴鍏?路 甯哥敤 API 路 浣庡欢杩熼厤缃?路 寮傚父澶勭悊</span></a>
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/master/doc/API.md"><b>API Reference</b><span>绫?/ 鏂规硶 / 閰嶇疆 / 鍥炶皟 / 鐘舵€?/ 閿欒鐮?/span></a>
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/master/doc/MAVEN_INTEGRATION.md"><b>Maven 闆嗘垚</b><span>瀹屾暣鎺ュ叆浠ｇ爜 路 Manifest / 甯冨眬 / 娣锋穯</span></a>
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/master/doc/INTEGRATION.md"><b>INTEGRATION</b><span>鐜瑕佹眰 路 GStreamer 璺緞 路 缂栬瘧 FAQ</span></a>
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/master/ios/README.md"><b>iOS SDK</b><span>XCFramework / SPM 路 Android鈬刬OS API 鏄犲皠</span></a>
-      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/releases"><b>Releases</b><span>v1.0.15 AAR + sources.jar 鍙戝竷鍖?/span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/main/doc/USAGE.md"><b>USAGE</b><span>快速接入 · 常用 API · 低延迟配置 · 异常处理</span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/main/doc/API.md"><b>API Reference</b><span>类 / 方法 / 配置 / 回调 / 状态 / 错误码</span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/main/doc/MAVEN_INTEGRATION.md"><b>Maven 集成</b><span>完整接入代码 · Manifest / 布局 / 混淆</span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/main/doc/INTEGRATION.md"><b>INTEGRATION</b><span>环境要求 · GStreamer 路径 · 编译 FAQ</span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/blob/main/ios/README.md"><b>iOS SDK</b><span>XCFramework / SPM · Android⇄iOS API 映射</span></a>
+      <a class="doc-card" href="https://github.com/Zero16800/latencyplayer/releases"><b>Releases</b><span>v1.0.15 AAR + sources.jar 发布包</span></a>
     </div>
   </div>
 </section>
@@ -349,10 +351,10 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
   <div class="f-links">
     <a href="https://github.com/Zero16800/latencyplayer">GitHub</a>
     <a href="https://github.com/Zero16800/latencyplayer/releases">Releases</a>
-    <a href="https://github.com/Zero16800/latencyplayer/blob/master/README.md">README</a>
+    <a href="https://github.com/Zero16800/latencyplayer/blob/main/README.md">README</a>
   </div>
-  LatencyPlayer SDK 路 Proprietary License 路 GStreamer 1.28.7 statically linked 路 libgstlibav is GPL-2.0<br>
-  瀹炴祴鏁版嵁浠呬唬琛ㄦ祴閲忔満鍨嬩笌閾捐矾锛屾帴鍏ユ柟璇蜂互鑷祴涓哄噯
+  LatencyPlayer SDK · Proprietary License · GStreamer 1.28.7 statically linked · libgstlibav is GPL-2.0<br>
+  实测数据仅代表测量机型与链路，接入方请以自测为准
 </footer>
 
 <script>
@@ -362,7 +364,7 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
 '<span class="kw">implementation</span>(<span class="st">"com.latencyplayer:latencyplayer-sdk:1.0.15"</span>)\n\n',
 '<span class="cm">// 2. Manifest</span>\n',
 '<span class="pr">&lt;uses-permission</span> android:name=<span class="st">"android.permission.INTERNET"</span><span class="pr">/&gt;</span>\n\n',
-'<span class="cm">// 3. 鍚屾浠ｇ爜</span>\n',
+'<span class="cm">// 3. 同步代码</span>\n',
 '<span class="ty">LatencyPlayerManager</span> player = <span class="kw">new</span> <span class="ty">LatencyPlayerManager</span>();\n',
 'player.<span class="fn">init</span>(context.<span class="fn">getApplicationContext</span>());\n',
 'player.<span class="fn">setConfig</span>(<span class="ty">LatencyPlayerConfig</span>.<span class="fn">builder</span>()\n',
@@ -371,43 +373,43 @@ tap 鈹€鈻?鏀捐 hold 鈹€鈻?鍑虹敾
 '    .<span class="fn">lowLatency</span>(<span class="kw">true</span>)\n',
 '    .<span class="fn">fastStartup</span>(<span class="kw">true</span>)\n',
 '    .<span class="fn">build</span>());\n',
-'player.<span class="fn">setSurface</span>(playerView);\n<span class="cm">// 鎴栦换鎰?SurfaceView/TextureView 鐨?Surface</span>\n',
+'player.<span class="fn">setSurface</span>(playerView);\n<span class="cm">// 或任意 SurfaceView/TextureView 的 Surface</span>\n',
 'player.<span class="fn">start</span>();'
 ],[
 'player.<span class="fn">setConfig</span>(<span class="ty">LatencyPlayerConfig</span>.<span class="fn">builder</span>()\n',
-'    .<span class="fn">bufferTime</span>(<span class="nu">0</span>)          <span class="cm">// 0鈥?000ms锛岄粯璁?200</span>\n',
-'    .<span class="fn">lowLatency</span>(<span class="kw">true</span>)       <span class="cm">// 闃熷垪椋庢墖鍖栵細</span>\n',
+'    .<span class="fn">bufferTime</span>(<span class="nu">0</span>)          <span class="cm">// 0–5000ms，默认 200</span>\n',
+'    .<span class="fn">lowLatency</span>(<span class="kw">true</span>)       <span class="cm">// 内部队列扁平化：</span>\n',
 '                            <span class="cm">// queue2 50ms / multiqueue 8 buffers</span>\n',
 '    .<span class="fn">fastStartup</span>(<span class="kw">true</span>)\n',
 '    .<span class="fn">build</span>());\n\n',
-'<span class="cm">// 绋虫€佺敾闈㈠欢杩熷疄娴嬩腑浣?~125ms</span>\n',
-'<span class="cm">// 锛堢浉瀵?PC nobuffer 鍙傝€冮摼璺紝閫愬抚鍐呭鍖归厤锛?/span>'
+'<span class="cm">// 稳态画面延迟实测中位 ~125ms</span>\n',
+'<span class="cm">// （相对 PC nobuffer 参考链路，逐帧内容匹配）</span>'
 ],[
-'<span class="cm">// 鍚姩鏃?椤甸潰鍋滅暀鏃堕鐑笅涓€璺祦</span>\n',
+'<span class="cm">// 启动时或页面停留时预热下一路流</span>\n',
 'player.<span class="fn">preconnect</span>(<span class="st">"rtmp://example.com/live/stream_b"</span>);\n',
-'<span class="cm">//   鈹斺攢 鍚庡彴瀹屾垚锛氬缓閾?+ CDN 2.5s 鐏屽叆娑堝寲</span>\n',
-'<span class="cm">//      + 棣栦釜鍏抽敭甯ц蒋瑙?+ 瑙嗛閾惧缓绔?/span>\n',
-'<span class="cm">//   鈹斺攢 绔嬪嵆杩斿洖锛屼笉闃诲涓荤嚎绋?/span>\n\n',
-'<span class="cm">// 涓氬姟闇€瑕佹椂锛堢绾ф垨灏忔椂绾э級寮€鎾?/span>\n',
-'player.<span class="fn">start</span>();            <span class="cm">// 鍚?URL 绔嬪嵆鍑虹敾</span>\n',
-'<span class="cm">//   鈹斺攢 avg 173ms锛堢偣鍑?鈫?鏂版祦棣栧抚锛岀湡鏈?8 杩炲垏锛?/span>\n',
-'<span class="cm">//   鈹斺攢 姣?preconnect 鍗?1 杩炴帴 + 1 杞В鐮佸櫒</span>\n',
-'<span class="cm">//   鈹斺攢 stop() / release() 浼氶噴鏀鹃杩炴帴</span>'
+'<span class="cm">//   └─ 后台完成：建链 + CDN 2.5s 灌入消化</span>\n',
+'<span class="cm">//      + 首个关键帧软解 + 视频链建立</span>\n',
+'<span class="cm">//   └─ 立即返回，不阻塞主线程</span>\n\n',
+'<span class="cm">// 业务需要时（秒级或更久）开播</span>\n',
+'player.<span class="fn">start</span>();            <span class="cm">// 同 URL 立即出画</span>\n',
+'<span class="cm">//   └─ avg 173ms（点击 → 新流首帧，真机 8 连切）</span>\n',
+'<span class="cm">//   └─ 每 preconnect 占 1 连接 + 1 软解码器</span>\n',
+'<span class="cm">//   └─ stop() / release() 会释放预连接</span>'
 ],[
 'player.<span class="fn">setCallback</span>(<span class="kw">new</span> <span class="ty">LatencyPlayerCallback</span>() {\n',
 '    <span class="kw">@Override</span> <span class="kw">public void</span> <span class="fn">onFirstFrame</span>() { }\n',
-'    <span class="cm">// 涓荤嚎绋嬶紱棣栧抚宸叉覆鏌擄紙棰勮繛鎺ュ垏鎹㈠氨闈犲畠锛?/span>\n\n',
+'    <span class="cm">// 主线程；首帧已渲染（预连接切换就靠它）</span>\n\n',
 '    <span class="kw">@Override</span> <span class="kw">public void</span> <span class="fn">onVideoSize</span>(<span class="kw">int</span> w, <span class="kw">int</span> h) { }\n\n',
 '    <span class="kw">@Override</span> <span class="kw">public void</span> <span class="fn">onDownloadSpeed</span>(<span class="kw">long</span> bps) { }\n\n',
 '    <span class="kw">@Override</span> <span class="kw">public void</span> <span class="fn">onError</span>(<span class="kw">int</span> code, <span class="ty">String</span> msg) {\n',
-'        <span class="cm">// 閿欒鐮佽〃瑙?doc/API.md</span>\n',
+'        <span class="cm">// 错误码表见 doc/API.md</span>\n',
 '    }\n',
 '});\n\n',
-'<span class="kw">long</span> age = player.<span class="fn">getLastFrameAgeMs</span>(); <span class="cm">// 鍗℃鑷</span>'
+'<span class="kw">long</span> age = player.<span class="fn">getLastFrameAgeMs</span>(); <span class="cm">// 卡死自检</span>'
 ],[
-'<span class="cm">// 鏂嚎鑷姩閲嶈繛锛氶棿闅?娆℃暟鍙厤锛? = 鏃犻檺</span>\n',
-'config.builder().<span class="fn">reconnectIntervalMs</span>(<span class="nu">3000</span>\n',
-'                 ).<span class="fn">maxReconnectCount</span>(<span class="nu">0</span>);'
+'<span class="cm">// 断线自动重连：间隔/次数可配，0 = 无限</span>\n',
+'config.<span class="fn">reconnectIntervalMs</span>(<span class="nu">3000</span>)\n',
+'      .<span class="fn">maxReconnectCount</span>(<span class="nu">0</span>);'
 ]];
 
 function show(i){
