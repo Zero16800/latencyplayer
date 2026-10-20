@@ -9,6 +9,10 @@
 堪比大牛SDK的Android 直播播放器 SDK。
 主路径：**RTMP 拉流 → 软/硬解 → appsink 直绘 `ANativeWindow`**（绕过 EGL，模拟器也稳定）。
 
+<p align="center">
+  <a href="website/index.html"><img src="website/assets/full.png" width="920" alt="LatencyPlayer 官网预览"></a>
+</p>
+
 ```java
 LatencyPlayerManager player = new LatencyPlayerManager();
 player.init(context.getApplicationContext());
