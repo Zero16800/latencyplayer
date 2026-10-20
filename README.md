@@ -3,7 +3,7 @@
 > English docs: [README.en.md](README.en.md)。
 
 
-![Uploading image.png…]()
+[![Uploading image.png…]()](https://github.com/Zero16800/latencyplayer/blob/main/website/334.png)
 
 
 堪比大牛SDK的Android 直播播放器 SDK。
