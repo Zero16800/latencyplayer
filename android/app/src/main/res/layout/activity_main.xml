@@ -15,7 +15,7 @@
             android:id="@+id/et_url"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="rtmp://aliyunjp02.caiyunwang.net/xiaochou/141?auth_key=1782553361-0-0-a1c430ba36349758563f81bb0a126ce5"
+            android:text="rtmp://192.168.3.110/live/test01"
             android:inputType="textUri"
             android:singleLine="true" />
 
