@@ -10,7 +10,7 @@
 主路径：**RTMP 拉流 → 软/硬解 → appsink 直绘 `ANativeWindow`**（绕过 EGL，模拟器也稳定）。
 
 <p align="center">
-  <a href="website/index.html"><img src="website/assets/full.png" width="920" alt="LatencyPlayer 官网预览"></a>
+  <a href="website/index.html"><img src="website/334.png" width="920" alt="LatencyPlayer 官网预览"></a>
 </p>
 
 ```java
