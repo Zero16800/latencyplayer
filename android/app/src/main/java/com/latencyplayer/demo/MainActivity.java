@@ -35,8 +35,8 @@ public class MainActivity extends AppCompatActivity {
 
     // 阿里云流列表
     private static final String[] STREAM_URLS = new String[]{
-            "rtmp://aliyunjp02.caiyunwang.net/xiaochou/141?auth_key=1782553361-0-0-a1c430ba36349758563f81bb0a126ce5",
-            "rtmp://aliyunjp02.caiyunwang.net/leisheng/174?auth_key=1782541771-0-0-d48d080ecff5e8df10a4b71bee134ae8"
+            "rtmp://192.168.3.110/live/test01",
+            "rtmp://192.168.3.110/live/test02"
     };
 
     private EditText etUrl;
